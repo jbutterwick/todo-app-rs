@@ -1,21 +1,19 @@
-use item::*;
-use output::*;
-use todo::*;
+use crate::output::{Output, Outputtable};
 
-enum ResponseType {
-	EXIT,
-	CONTINUE,
+pub(crate) enum ResponseType {
+	Exit,
+	Continue,
 }
 
-pub(crate) struct Response {
-	kind: ResponseType,
+pub struct Response {
+	pub(crate) kind: ResponseType,
 }
 
 impl Response {
-	pub fn to_output(&self) -> Output {}
+	pub fn to_output<T: Outputtable>(&self) -> Output<T> {
+		todo!("implement")
+	}
 }
-
-struct
 
 // class StringResult extends Result {
 // constructor(private readonly str: ColoredString) {

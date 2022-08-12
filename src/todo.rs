@@ -1,17 +1,20 @@
 use crate::item::*;
-use crate::output::ColoredString;
-use crate::response::Response;
+
+use crate::response::{Response, ResponseType};
 
 pub struct Todo {
-	items: Vec<Item>,
+	pub(crate) items: Vec<Item>,
 }
 
-trait Dispatch {
-	fn dispatch(input: str) -> Response;
-}
-
-impl Dispatch for Todo {
-	pub fn dispatch(input: &str) -> Response {
-		todo!()
+impl Todo {
+	pub fn dispatch(mut self, input: &str) -> Response {
+		match input {
+			_ => {
+				self.items.push(Item::from(input));
+				Response {
+					kind: ResponseType::Exit,
+				}
+			}
+		}
 	}
 }

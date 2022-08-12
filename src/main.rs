@@ -3,6 +3,7 @@ mod output;
 mod response;
 mod todo;
 
+use crate::todo::Todo;
 use std::io;
 
 fn main() {
@@ -17,5 +18,7 @@ fn main() {
 
 	println!("You entered: {command}");
 
-	let response = todo::Todo::dispatch(&command);
+	let todo = Todo { items: vec![] };
+
+	let response = todo.dispatch(&command);
 }

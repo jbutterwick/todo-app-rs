@@ -10,13 +10,13 @@ pub struct Output<T>
 where
 	T: Outputtable,
 {
-	pub kind: str,
+	pub kind: String,
 	pub value: T,
 }
 
 pub struct ColoredString {
 	pub color: Color,
-	pub string: str,
+	pub string: String,
 }
 
 impl ColoredString {
@@ -31,7 +31,7 @@ impl ColoredString {
 	}
 }
 
-trait Outputtable {
+pub(crate) trait Outputtable {
 	fn show(&self) -> String;
 }
 
@@ -47,8 +47,8 @@ impl Outputtable for ColoredString {
 	}
 }
 
-impl Outputtable for str {
+impl Outputtable for String {
 	fn show(&self) -> String {
-		String::from(&self)
+		String::from(self)
 	}
 }
