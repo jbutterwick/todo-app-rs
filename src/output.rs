@@ -6,12 +6,36 @@ pub enum Color {
 	Default,
 }
 
-pub struct ColoredString<'a> {
-	pub color: Color,
-	pub string: &'a str,
+pub struct Output<T>
+where
+	T: Outputtable,
+{
+	pub kind: str,
+	pub value: T,
 }
 
-impl ColoredString<'_> {
+pub struct ColoredString {
+	pub color: Color,
+	pub string: str,
+}
+
+impl ColoredString {
+	fn color_to_code(&self) -> i32 {
+		match self.color {
+			Color::Red => 31,
+			Color::Green => 32,
+			Color::Yellow => 33,
+			Color::Blue => 34,
+			Color::Default => 0,
+		}
+	}
+}
+
+trait Outputtable {
+	fn show(&self) -> String;
+}
+
+impl Outputtable for ColoredString {
 	fn show(&self) -> String {
 		let mut string = String::new();
 		string.push_str("\u{001B}[");
@@ -21,14 +45,10 @@ impl ColoredString<'_> {
 		string.push_str("\u{001B}[0m");
 		string
 	}
+}
 
-	fn color_to_code(&self) -> i32 {
-		match self.color {
-			Color::Red => 31,
-			Color::Green => 32,
-			Color::Yellow => 33,
-			Color::Blue => 34,
-			Color::Default => 0,
-		}
+impl Outputtable for str {
+	fn show(&self) -> String {
+		String::from(&self)
 	}
 }
