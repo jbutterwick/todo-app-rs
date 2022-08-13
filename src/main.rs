@@ -3,6 +3,7 @@ mod output;
 mod response;
 mod todo;
 
+use crate::item::ItemList;
 use crate::todo::Todo;
 use std::io;
 
@@ -10,7 +11,7 @@ fn main() {
 	println!("Todo List");
 	println!("Enter a command. Enter `help` to list available commands: ");
 
-	let mut command = String::new(); // Defined an empty String on the Heap
+	let mut command = String::new();
 
 	io::stdin()
 		.read_line(&mut command)
@@ -18,7 +19,9 @@ fn main() {
 
 	println!("You entered: {command}");
 
-	let todo = Todo { items: vec![] };
+	let todo = Todo {
+		item_list: ItemList { items: vec![] },
+	};
 
-	let response = todo.dispatch(&command);
+	println!("{}", todo.dispatch::<String>(&command))
 }

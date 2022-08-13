@@ -6,9 +6,13 @@ pub enum State {
 	Done,
 }
 
+pub struct ItemList {
+	pub(crate) items: Vec<Item>,
+}
+
 pub struct Item {
-	description: String,
-	state: State,
+	pub description: String,
+	pub state: State,
 }
 
 impl Item {

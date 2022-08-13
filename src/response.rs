@@ -1,17 +1,44 @@
-use crate::output::{Output, Outputtable};
+use crate::output::{Color, ColoredString, Output, Outputtable};
 
-pub(crate) enum ResponseType {
+pub enum ResponseType {
 	Exit,
 	Continue,
 }
 
-pub struct Response {
-	pub(crate) kind: ResponseType,
+pub trait Respond<T>
+where
+	T: Outputtable,
+{
+	fn to_output(self) -> Output<'static, T>;
 }
 
-impl Response {
-	pub fn to_output<T: Outputtable>(&self) -> Output<T> {
-		todo!("implement")
+pub struct StringResponse {
+	str: ColoredString,
+	kind: ResponseType,
+}
+
+impl Respond<ColoredString> for StringResponse {
+	fn to_output(self) -> Output<'static, ColoredString> {
+		Output {
+			kind: &self.kind,
+			value: &self.str,
+		}
+	}
+}
+
+pub struct ErrorResponse {
+	error_msg: String,
+}
+
+impl Respond<ColoredString> for ErrorResponse {
+	fn to_output(self) -> Output<'static, ColoredString> {
+		Output {
+			kind: &ResponseType::Exit,
+			value: &ColoredString {
+				color: Color::Red,
+				string: String::from(&self.error_msg),
+			},
+		}
 	}
 }
 
