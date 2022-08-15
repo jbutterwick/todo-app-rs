@@ -15,12 +15,18 @@ pub struct Item {
 	pub state: State,
 }
 
+pub struct Line<'a> {
+	index: i32,
+	string: &'a String,
+	suffix: Option<&'a str>,
+}
+
 impl Item {
-	fn to_line(&self, index: i32) -> Vec<(i32, ColoredString, Option<&str>)> {
+	fn to_line(&self, index: i32) -> Vec<Line> {
 		let mut string = String::from(&self.description);
-		vec![(
-			index + 1,
-			ColoredString {
+		vec![Line {
+			index: index + 1,
+			string: &ColoredString {
 				color: if self.state == State::Done {
 					Color::Blue
 				} else {
@@ -32,9 +38,10 @@ impl Item {
 				} else {
 					string
 				},
-			},
-			None,
-		)]
+			}
+			.show(),
+			suffix: None,
+		}]
 	}
 }
 

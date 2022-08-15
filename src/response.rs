@@ -1,92 +1,100 @@
 use crate::output::{Color, ColoredString, Output, Outputtable};
+use crate::ItemList;
 
 pub enum ResponseType {
 	Exit,
 	Continue,
+	Error,
 }
 
 pub trait Respond<T>
 where
 	T: Outputtable,
 {
-	fn to_output(self) -> Output<'static, T>;
+	fn to_output(&self) -> Output<T>;
 }
 
-pub struct StringResponse {
-	str: ColoredString,
-	kind: ResponseType,
+pub struct StringResponse<'a> {
+	pub str: &'a str,
 }
 
-impl Respond<ColoredString> for StringResponse {
-	fn to_output(self) -> Output<'static, ColoredString> {
+impl Respond<String> for StringResponse<'_> {
+	fn to_output(&self) -> Output<String> {
 		Output {
-			kind: &self.kind,
-			value: &self.str,
+			kind: ResponseType::Continue,
+			value: String::from(self.str),
 		}
 	}
 }
 
-pub struct ErrorResponse {
-	error_msg: String,
+pub struct ErrorResponse<'a> {
+	pub error_msg: &'a str,
 }
 
-impl Respond<ColoredString> for ErrorResponse {
-	fn to_output(self) -> Output<'static, ColoredString> {
+impl Respond<String> for ErrorResponse<'_> {
+	fn to_output(&self) -> Output<String> {
 		Output {
-			kind: &ResponseType::Exit,
-			value: &ColoredString {
+			kind: ResponseType::Exit,
+			value: ColoredString {
 				color: Color::Red,
-				string: String::from(&self.error_msg),
-			},
+				string: String::from(self.error_msg),
+			}
+			.show(),
 		}
 	}
 }
 
-// class StringResult extends Result {
-// constructor(private readonly str: ColoredString) {
-// super('continue')
-// }
-//
-// toOuput(): Output {
-// return this.str.asOutput()
-// }
-// }
-//
-// class Exit extends Result {
-// toOuput(): Output {
-// return new ColoredString('blue', 'bye!').asOutput()
-// }
-// }
-//
-// class ErrorResult extends StringResult {
-// constructor(readonly error: string) {
-// super(new ColoredString('red', error))
-// }
-// }
-//
-// export const help = new StringResult(
-// new ColoredString(
-// 'yellow',
-// `
-// Available commands:
-// help                              Displays this help
-// list                              Display the todo list
-// add <todo item description>       Adds the item to the todo list
-// done <todo item number>           Marks the item as done
-// quit                              Exit the program`,
-// ),
-// )
-//
-// export class ListResult extends Result {
-// constructor(private readonly items: Item[]) {
-// super('continue')
-// }
-//
-// toOuput(): Output {
-// return to_output(this.items)
-// }
-// }
-//
+pub struct ExitResponse<'a> {
+	pub exit_msg: &'a str,
+}
+
+impl Respond<String> for ExitResponse<'_> {
+	fn to_output(&self) -> Output<String> {
+		Output {
+			kind: ResponseType::Exit,
+			value: ColoredString {
+				color: Color::Blue,
+				string: String::from(self.exit_msg),
+			}
+			.show(),
+		}
+	}
+}
+
+pub struct HelpResponse<'a> {
+	pub help_msg: &'a str,
+}
+
+impl Respond<String> for HelpResponse<'_> {
+	fn to_output(&self) -> Output<String> {
+		Output {
+			kind: ResponseType::Continue,
+			value: ColoredString {
+				color: Color::Yellow,
+				string: String::from(self.help_msg),
+			}
+			.show(),
+		}
+	}
+}
+
+pub struct ListResponse<'a> {
+	pub list: &'a ItemList,
+}
+
+impl Respond<String> for ListResponse<'_> {
+	fn to_output(&self) -> Output<String> {
+		let mut string = String::new();
+		for item in &self.list.items {
+			string.push_str(&ColoredString::from(item).show())
+		}
+		Output {
+			kind: ResponseType::Continue,
+			value: string,
+		}
+	}
+}
+
 // export const emptyListHint = new StringResult(
 // new ColoredString('yellow', 'List is empty.  Try adding some items'),
 // )

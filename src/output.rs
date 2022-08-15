@@ -10,16 +10,16 @@ pub enum Color {
 	Default,
 }
 
-pub struct Output<'a, T>
+pub struct Output<T>
 where
 	T: Outputtable,
 {
-	pub kind: &'a ResponseType,
-	pub value: &'a T,
+	pub kind: ResponseType,
+	pub value: T,
 }
 
-impl Display for Output<'_, String> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl Display for Output<String> {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		write!(f, "{}", self.value)
 	}
 }
@@ -68,6 +68,15 @@ impl From<Item> for ColoredString {
 	}
 }
 
+impl From<&Item> for ColoredString {
+	fn from(item: &Item) -> Self {
+		ColoredString {
+			color: Color::from(item.state),
+			string: item.description,
+		}
+	}
+}
+
 impl From<ColoredString> for String {
 	fn from(c_str: ColoredString) -> Self {
 		c_str.show()
@@ -105,11 +114,7 @@ impl Outputtable for Vec<ColoredString> {
 	fn show(&self) -> String {
 		let mut string = String::new();
 		for x in self {
-			string.push_str("\u{001B}[");
-			string.push_str(&i32::from(&x.color).to_string());
-			string.push('m');
-			string.push_str(&x.string);
-			string.push_str("\u{001B}[0m\n");
+			string.push_str(&x.show())
 		}
 		string
 	}
