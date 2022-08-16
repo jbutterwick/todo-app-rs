@@ -34,7 +34,7 @@ pub struct ErrorResponse<'a> {
 impl Respond<String> for ErrorResponse<'_> {
 	fn to_output(&self) -> Output<String> {
 		Output {
-			kind: ResponseType::Exit,
+			kind: ResponseType::Error,
 			value: ColoredString {
 				color: Color::Red,
 				string: String::from(self.error_msg),
@@ -85,8 +85,9 @@ pub struct ListResponse<'a> {
 impl Respond<String> for ListResponse<'_> {
 	fn to_output(&self) -> Output<String> {
 		let mut string = String::new();
-		for item in &self.list.items {
-			string.push_str(&ColoredString::from(item).show())
+		for (index, item) in self.list.items.iter().enumerate() {
+			string.push_str(&String::from(item.to_line(index)));
+			string.push_str("\n");
 		}
 		Output {
 			kind: ResponseType::Continue,

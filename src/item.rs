@@ -1,6 +1,5 @@
 use crate::output::*;
 use std::cmp::Ordering;
-use std::str::Chars;
 
 #[derive(PartialEq)]
 pub enum State {
@@ -17,16 +16,16 @@ pub struct Item {
 	pub state: State,
 }
 
-pub struct Line<'a> {
-	index: i32,
+pub struct Line {
+	index: usize,
 	string: String,
-	suffix: Option<&'a str>,
+	suffix: Option<String>,
 }
 
 impl Item {
-	fn to_line(&self, index: i32) -> Vec<Line> {
+	pub fn to_line(&self, index: usize) -> Line {
 		let mut string = String::from(&self.description);
-		vec![Line {
+		Line {
 			index: index + 1,
 			string: ColoredString {
 				color: if self.state == State::Done {
@@ -35,7 +34,7 @@ impl Item {
 					Color::Green
 				},
 				string: if self.state == State::Done {
-					string.push_str("(done)");
+					string.push_str(" - (done)");
 					string
 				} else {
 					string
@@ -43,7 +42,18 @@ impl Item {
 			}
 			.show(),
 			suffix: None,
-		}]
+		}
+	}
+}
+
+impl From<Line> for String {
+	fn from(line: Line) -> Self {
+		let mut string = String::new();
+		string.push_str(&line.index.to_string());
+		string.push_str(" ");
+		string.push_str(&line.string);
+		string.push_str(&line.suffix.unwrap_or(String::new()));
+		string
 	}
 }
 

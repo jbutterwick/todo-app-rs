@@ -68,15 +68,6 @@ impl From<Item> for ColoredString {
 	}
 }
 
-impl From<&Item> for ColoredString {
-	fn from(item: &Item) -> Self {
-		ColoredString {
-			color: Color::from(item.state),
-			string: item.description,
-		}
-	}
-}
-
 impl From<ColoredString> for String {
 	fn from(c_str: ColoredString) -> Self {
 		c_str.show()
