@@ -1,3 +1,5 @@
+extern crate core;
+
 mod item;
 mod output;
 mod response;
@@ -14,13 +16,19 @@ fn main() {
 	println!("Todo List");
 	println!("Enter a command. Enter `help` to list available commands: ");
 
-	match rep_loop() {
-		Ok(_) => (),
-		Err(_) => (),
+	let todo = Todo {
+		item_list: ItemList { items: vec![] },
+	};
+
+	match rep_loop(todo, None) {
+		Ok(result) => {
+			println!("{}", result);
+		}
+		Err(error) => panic!("error with message: {:?}", error),
 	}
 }
 
-fn rep_loop() -> Result<String, Error> {
+fn rep_loop(todo: Todo, result: Option<Result<String, Error>>) -> Result<String, Error> {
 	let mut command = String::new();
 
 	io::stdin()
@@ -28,12 +36,6 @@ fn rep_loop() -> Result<String, Error> {
 		.expect("Failed to read command");
 
 	println!("You entered: {command}");
-
-	let todo = Todo {
-		item_list: ItemList { items: vec![] },
-	};
-
-	// this is a turbo fish!!
 
 	match todo.dispatch(&command) {
 		Output {
@@ -44,5 +46,9 @@ fn rep_loop() -> Result<String, Error> {
 			kind: ResponseType::Exit,
 			value,
 		} => Ok(String::from(value)),
+		Output {
+			kind: ResponseType::Error,
+			value,
+		} => Err(Error),
 	}
 }

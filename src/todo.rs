@@ -7,13 +7,13 @@ pub struct Todo {
 }
 
 impl Todo {
-	pub fn dispatch(self, input: &str) -> Output<String> {
+	pub fn dispatch(mut self, input: &str) -> Output<String> {
 		let trimmed_input = input.trim();
 		let commands = trimmed_input.split_whitespace().collect::<Vec<&str>>();
 
 		match commands[..] {
 			[first] => match first {
-				"help" => HelpResponse {
+				"help" | "Help" => HelpResponse {
 					help_msg: &String::from(
 						"
       Available commands:
@@ -26,15 +26,15 @@ impl Todo {
 					),
 				}
 				.to_output(),
-				"list" => ListResponse {
+				"list" | "List" => ListResponse {
 					list: &self.item_list,
 				}
 				.to_output(),
-				"quit" => ExitResponse {
+				"quit" | "Quit" => ExitResponse {
 					exit_msg: &String::from("buh-bye!"),
 				}
 				.to_output(),
-				"add" | "done" => ErrorResponse {
+				"add" | "Add" | "done" | "Done" => ErrorResponse {
 					error_msg: "not enough arguments",
 				}
 				.to_output(),
@@ -44,9 +44,32 @@ impl Todo {
 				.to_output(),
 			},
 			[first, second] => match first {
-				"add" => StringResponse { str: "buh-bye!" }.to_output(),
-				"done" => StringResponse { str: "buh-bye!" }.to_output(),
-				"help" | "list" | "quit" => ErrorResponse {
+				"add" | "Add" => {
+					self.item_list.items.push(Item::from(second));
+					self.item_list.items.sort();
+					ListResponse {
+						list: &self.item_list,
+					}
+				}
+				.to_output(),
+				"done" | "Done" => {
+					let index = self
+						.item_list
+						.items
+						.binary_search(&Item::from(second))
+						.expect("done command must have a valid item index");
+					let mut item = self
+						.item_list
+						.items
+						.get_mut(index)
+						.expect("index out of bounds");
+					item.state = State::Done;
+					ListResponse {
+						list: &self.item_list,
+					}
+				}
+				.to_output(),
+				"help" | "Help" | "list" | "List" | "quit" | "Quit" => ErrorResponse {
 					error_msg: stringify!("unexpected argument : {}", second),
 				}
 				.to_output(),

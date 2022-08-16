@@ -94,37 +94,3 @@ impl Respond<String> for ListResponse<'_> {
 		}
 	}
 }
-
-// export const emptyListHint = new StringResult(
-// new ColoredString('yellow', 'List is empty.  Try adding some items'),
-// )
-//
-// export const doneIndexError: Result = new ErrorResult(
-// 'Done command must have a valid item index',
-// )
-//
-// export const unexpectedArg: (cn: string) => Result = (commandName: string) =>
-// new ErrorResult(`${commandName} command does not take any arguments`)
-//
-// export const missingArg: (cn: string) => Result = (commandName: string) =>
-// new ErrorResult(`${commandName} command requires an argument`)
-//
-// export const unknown: Result = new ErrorResult(
-// 'I do not understand your command.  ' + 'Enter help to display available commands.',
-// )
-//
-// export const exit = new Exit('exit')
-//
-// export const next = async (
-//     todo: Todo,
-//     result: Result,
-//     loop: (todo: Todo) => Promise<'done'>,
-// stop: () => 'done',
-// ): Promise<'done'> => {
-// switch (result.kind) {
-// case 'continue':
-// return await loop(todo)
-// case 'exit':
-// return stop()
-// }
-// }

@@ -1,4 +1,6 @@
 use crate::output::*;
+use std::cmp::Ordering;
+use std::str::Chars;
 
 #[derive(PartialEq)]
 pub enum State {
@@ -7,7 +9,7 @@ pub enum State {
 }
 
 pub struct ItemList {
-	pub(crate) items: Vec<Item>,
+	pub items: Vec<Item>,
 }
 
 pub struct Item {
@@ -17,7 +19,7 @@ pub struct Item {
 
 pub struct Line<'a> {
 	index: i32,
-	string: &'a String,
+	string: String,
 	suffix: Option<&'a str>,
 }
 
@@ -26,7 +28,7 @@ impl Item {
 		let mut string = String::from(&self.description);
 		vec![Line {
 			index: index + 1,
-			string: &ColoredString {
+			string: ColoredString {
 				color: if self.state == State::Done {
 					Color::Blue
 				} else {
@@ -51,5 +53,25 @@ impl From<&str> for Item {
 			state: State::Todo,
 			description: String::from(string),
 		}
+	}
+}
+
+impl Eq for Item {}
+
+impl PartialEq<Self> for Item {
+	fn eq(&self, other: &Self) -> bool {
+		String::eq(&self.description, &other.description)
+	}
+}
+
+impl PartialOrd<Self> for Item {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		String::partial_cmp(&self.description, &other.description)
+	}
+}
+
+impl Ord for Item {
+	fn cmp(&self, other: &Self) -> Ordering {
+		String::cmp(&self.description, &other.description)
 	}
 }
