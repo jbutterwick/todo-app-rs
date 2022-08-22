@@ -66,8 +66,7 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 	match &commands[..] {
 		&[first] => match first {
 			"help" => HelpResponse {
-				help_msg: &String::from(
-					"
+				help_msg: "
                       Available commands:
                       help                              Displays this help
                       list                              Display the todo list
@@ -75,7 +74,6 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
                       done <todo item number>           Marks the item as done
                       quit                              Exit the program
 					",
-				),
 			}
 			.to_output(),
 			"list" => ListResponse {
@@ -83,15 +81,15 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 			}
 			.to_output(),
 			"quit" | "exit" => ExitResponse {
-				exit_msg: &String::from("buh-bye!"),
+				exit_msg: "buh-bye!",
 			}
 			.to_output(),
 			"add" | "done" => ErrorResponse {
-				error_msg: "not enough arguments",
+				error_msg: "not enough arguments provided for this command",
 			}
 			.to_output(),
 			_ => ErrorResponse {
-				error_msg: stringify!("unknown argument : {}", first),
+				error_msg: "unknown argument",
 			}
 			.to_output(),
 		},
@@ -112,12 +110,12 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 					.item_list
 					.items
 					.binary_search(&Item::from(&*string_tail))
-					.unwrap_or({
-						let maybe_index = string_tail
+					.unwrap_or(
+						string_tail
 							.parse::<usize>()
-							.expect("unable to find index by parse or search");
-						maybe_index - 1
-					});
+							.expect("unable to find index by parse or search")
+							- 1,
+					);
 
 				let mut item = todo
 					.item_list
@@ -131,16 +129,13 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 				}
 			}
 			.to_output(),
-			&"help" | &"list" | &"quit" => {
-				let string_tail = tail.join(" ");
-				ErrorResponse {
-					error_msg: stringify!("unexpected argument : {}", string_tail),
-				}
-				.to_output()
+			&"help" | &"list" | &"quit" => ErrorResponse {
+				error_msg: "unexpected argument",
 			}
+			.to_output(),
 
 			_ => ErrorResponse {
-				error_msg: stringify!("unknown argument : {}", second),
+				error_msg: "unknown argument",
 			}
 			.to_output(),
 		},
