@@ -23,10 +23,10 @@ fn main() {
 		item_list: ItemList { items: vec![] },
 	};
 
-	rep_loop(&mut todo)
+	app_loop(&mut todo)
 }
 
-fn rep_loop(todo: &mut Todo) -> () {
+fn app_loop(todo: &mut Todo) -> () {
 	let mut command = String::new();
 
 	io::stdin()
@@ -41,7 +41,7 @@ fn rep_loop(todo: &mut Todo) -> () {
 			value,
 		} => {
 			println!("{}", &value);
-			rep_loop(todo)
+			app_loop(todo)
 		}
 		Output {
 			kind: ResponseType::Exit,
@@ -59,12 +59,13 @@ fn rep_loop(todo: &mut Todo) -> () {
 }
 
 fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
-	let trimmed_input = input.trim();
-	let commands = trimmed_input.split_whitespace().collect::<Vec<&str>>();
+	let trimmed = input.trim();
+	let lowercase = trimmed.to_lowercase();
+	let commands = lowercase.split_whitespace().collect::<Vec<&str>>();
 
-	match commands[..] {
-		[first] => match first {
-			"help" | "Help" => HelpResponse {
+	match &commands[..] {
+		&[first] => match first {
+			"help" => HelpResponse {
 				help_msg: &String::from(
 					"
                       Available commands:
@@ -77,15 +78,15 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 				),
 			}
 			.to_output(),
-			"list" | "List" => ListResponse {
+			"list" => ListResponse {
 				list: &todo.item_list,
 			}
 			.to_output(),
-			"quit" | "Quit" | "exit" | "Exit" => ExitResponse {
+			"quit" | "exit" => ExitResponse {
 				exit_msg: &String::from("buh-bye!"),
 			}
 			.to_output(),
-			"add" | "Add" | "done" | "Done" => ErrorResponse {
+			"add" | "done" => ErrorResponse {
 				error_msg: "not enough arguments",
 			}
 			.to_output(),
@@ -94,45 +95,55 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 			}
 			.to_output(),
 		},
-		[first, second] => match first {
-			"add" | "Add" => {
-				todo.item_list.items.push(Item::from(second));
+		[first, tail @ ..] => match first {
+			&"add" => {
+				let string_tail = tail.join(" ");
+				todo.item_list.items.push(Item::from(&*string_tail));
 				todo.item_list.items.sort();
 				ListResponse {
 					list: &todo.item_list,
 				}
 			}
 			.to_output(),
-			"done" | "Done" => {
+			&"done" => {
+				let string_tail = tail.join(" ");
+
 				let index = todo
 					.item_list
 					.items
-					.binary_search(&Item::from(second))
-					.expect("done command must have a valid item index");
+					.binary_search(&Item::from(&*string_tail))
+					.unwrap_or({
+						let maybe_index = string_tail
+							.parse::<usize>()
+							.expect("unable to find index by parse or search");
+						maybe_index - 1
+					});
+
 				let mut item = todo
 					.item_list
 					.items
 					.get_mut(index)
 					.expect("index out of bounds");
+
 				item.state = State::Done;
 				ListResponse {
 					list: &todo.item_list,
 				}
 			}
 			.to_output(),
-			"help" | "Help" | "list" | "List" | "quit" | "Quit" => ErrorResponse {
-				error_msg: stringify!("unexpected argument : {}", second),
+			&"help" | &"list" | &"quit" => {
+				let string_tail = tail.join(" ");
+				ErrorResponse {
+					error_msg: stringify!("unexpected argument : {}", string_tail),
+				}
+				.to_output()
 			}
-			.to_output(),
+
 			_ => ErrorResponse {
 				error_msg: stringify!("unknown argument : {}", second),
 			}
 			.to_output(),
 		},
-		[_, _, ..] => ErrorResponse {
-			error_msg: "too many arguments. type `help`",
-		}
-		.to_output(),
 		[] => ErrorResponse {
 			error_msg: "no argument made. type `help`",
 		}
