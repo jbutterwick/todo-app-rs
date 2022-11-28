@@ -44,6 +44,12 @@ impl Item {
 			suffix: None,
 		}
 	}
+	pub fn to_string(&self) -> String {
+		match &self.state {
+			State::Todo => String::new() + "- [ ] " + &self.description,
+			State::Done => String::new() + "- [x] " + &self.description,
+		}
+	}
 }
 
 impl From<Line> for String {

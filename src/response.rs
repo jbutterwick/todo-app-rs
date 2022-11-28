@@ -1,6 +1,6 @@
 use crate::output::{Color, ColoredString, Output, Outputtable};
 use crate::ItemList;
-use std::fs::File;
+use std::fs;
 pub enum ResponseType {
 	Exit,
 	Continue,
@@ -84,13 +84,11 @@ pub struct ListResponse<'a> {
 
 impl Respond<String> for ListResponse<'_> {
 	fn to_output(&self) -> Output<String> {
-		let mut string = String::from("Writing the following list to todo.md");
+		let mut string = String::new();
 		for (index, item) in self.list.items.iter().enumerate() {
 			string.push_str(&String::from(item.to_line(index)));
 			string.push_str("\n");
 		}
-		let mut f = File::create("foo.txt").unwrap();
-		f.write_all(b"Hello, world!").unwrap();
 		Output {
 			kind: ResponseType::Continue,
 			value: string,
@@ -105,13 +103,14 @@ pub struct SaveResponse<'a> {
 impl Respond<String> for SaveResponse<'_> {
 	fn to_output(&self) -> Output<String> {
 		let mut string = String::new();
-		for (index, item) in self.list.items.iter().enumerate() {
-			string.push_str(&String::from(item.to_line(index)));
+		for item in self.list.items.iter() {
+			string.push_str(&String::from(item.to_string()));
 			string.push_str("\n");
 		}
+		fs::write("todo.md", string).unwrap();
 		Output {
 			kind: ResponseType::Continue,
-			value: string,
+			value: String::from("wrote list to todo.md"),
 		}
 	}
 }
