@@ -1,2 +1,0 @@
-- [x] buy domain pantrydroppr
-- [ ] make mackenxies app
