@@ -69,7 +69,7 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 			"help" => HelpResponse {
 				help_msg: "
 						  Available commands:
-						  help                              Displays this help
+						  help                              Displays this help message
 						  list                              Display the todo list
 						  add <todo item description>       Adds the item to the todo list
 						  done <todo item number>           Marks the item as done
