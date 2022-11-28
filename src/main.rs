@@ -4,6 +4,8 @@ mod item;
 mod output;
 mod response;
 
+use response::SaveResponse;
+
 use crate::item::{Item, ItemList, State};
 use crate::output::Output;
 use crate::response::{
@@ -77,6 +79,11 @@ fn dispatch(todo: &mut Todo, input: String) -> Output<String> {
 		.to_output(),
 
 		"list" => ListResponse {
+			list: &todo.item_list,
+		}
+		.to_output(),
+
+		"save" => SaveResponse {
 			list: &todo.item_list,
 		}
 		.to_output(),
