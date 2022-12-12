@@ -1,5 +1,9 @@
 use crate::output::*;
-use std::cmp::Ordering;
+use std::{
+	cmp::Ordering,
+	collections::hash_map::DefaultHasher,
+	hash::{Hash, Hasher},
+};
 
 #[derive(PartialEq)]
 pub enum State {
@@ -7,13 +11,10 @@ pub enum State {
 	Done,
 }
 
-pub struct ItemList {
-	pub items: Vec<Item>,
-}
-
 pub struct Item {
 	pub description: String,
 	pub state: State,
+	pub hash: u64,
 }
 
 pub struct Line {
@@ -23,6 +24,15 @@ pub struct Line {
 }
 
 impl Item {
+	pub fn new(description: String) -> Self {
+		let mut s = DefaultHasher::new();
+		description.hash(&mut s);
+		Item {
+			description,
+			state: State::Todo,
+			hash: s.finish(),
+		}
+	}
 	pub fn to_line(&self, index: usize) -> Line {
 		let mut string = String::from(&self.description);
 		Line {
@@ -65,10 +75,7 @@ impl From<Line> for String {
 
 impl From<&str> for Item {
 	fn from(string: &str) -> Self {
-		Item {
-			state: State::Todo,
-			description: String::from(string),
-		}
+		Item::new(String::from(string))
 	}
 }
 

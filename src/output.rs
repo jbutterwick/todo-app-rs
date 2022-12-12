@@ -74,17 +74,6 @@ impl From<ColoredString> for String {
 	}
 }
 
-impl From<ItemList> for String {
-	fn from(item_list: ItemList) -> Self {
-		let mut string = String::new();
-		for x in item_list.items {
-			string.push_str(&*ColoredString::from(x).show());
-			string.push("\n".parse().unwrap())
-		}
-		string
-	}
-}
-
 pub trait Outputtable {
 	fn show(&self) -> String;
 }
