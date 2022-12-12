@@ -156,8 +156,11 @@ impl Todo {
 						Ok(num) => {
 							self.item_list.remove(num - 1);
 						}
-						_ => println!("unable to find item {}", string_index),
-					};
+						_ => {
+							self.item_list
+								.retain(|item| !(item.description == string_index));
+						}
+					}
 
 					ListResponse {
 						list: &self.item_list,
