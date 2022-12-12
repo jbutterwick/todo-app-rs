@@ -1,5 +1,5 @@
 use crate::output::{Color, ColoredString, Output, Outputtable};
-use crate::ItemList;
+use crate::Item;
 use std::fs;
 pub enum ResponseType {
 	Exit,
@@ -27,19 +27,30 @@ impl Respond<String> for StringResponse<'_> {
 	}
 }
 
-pub struct ErrorResponse<'a> {
-	pub error_msg: &'a str,
+pub struct ErrorResponse {
+	pub error_msg: String,
 }
 
-impl Respond<String> for ErrorResponse<'_> {
+impl Respond<String> for ErrorResponse {
 	fn to_output(&self) -> Output<String> {
 		Output {
 			kind: ResponseType::Error,
 			value: ColoredString {
 				color: Color::Red,
-				string: String::from(self.error_msg),
+				string: String::from(&self.error_msg),
 			}
 			.show(),
+		}
+	}
+}
+
+pub struct NoResponse;
+
+impl Respond<String> for NoResponse {
+	fn to_output(&self) -> Output<String> {
+		Output {
+			kind: ResponseType::Continue,
+			value: String::new(),
 		}
 	}
 }
@@ -79,13 +90,13 @@ impl Respond<String> for HelpResponse<'_> {
 }
 
 pub struct ListResponse<'a> {
-	pub list: &'a ItemList,
+	pub list: &'a Vec<Item>,
 }
 
 impl Respond<String> for ListResponse<'_> {
 	fn to_output(&self) -> Output<String> {
 		let mut string = String::new();
-		for (index, item) in self.list.items.iter().enumerate() {
+		for (index, item) in self.list.iter().enumerate() {
 			string.push_str(&String::from(item.to_line(index)));
 			string.push_str("\n");
 		}
@@ -97,20 +108,20 @@ impl Respond<String> for ListResponse<'_> {
 }
 
 pub struct SaveResponse<'a> {
-	pub list: &'a ItemList,
+	pub list: &'a Vec<Item>,
 }
 
 impl Respond<String> for SaveResponse<'_> {
 	fn to_output(&self) -> Output<String> {
 		let mut string = String::new();
-		for item in self.list.items.iter() {
+		for item in self.list.iter() {
 			string.push_str(&String::from(item.to_string()));
 			string.push_str("\n");
 		}
-		fs::write("todo.md", string).unwrap();
+		fs::write("TODO.md", string).unwrap();
 		Output {
 			kind: ResponseType::Continue,
-			value: String::from("wrote list to todo.md"),
+			value: String::from("wrote list to TODO.md"),
 		}
 	}
 }
