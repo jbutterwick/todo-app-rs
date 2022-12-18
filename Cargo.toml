@@ -9,3 +9,4 @@ readme = "./README.md"
 license = "Unlicense"
 
 [dependencies]
+crossterm = "0.25.0"

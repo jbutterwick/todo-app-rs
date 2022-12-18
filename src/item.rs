@@ -33,6 +33,21 @@ impl Item {
 			hash: s.finish(),
 		}
 	}
+
+	pub fn parse(string: &str) -> Self {
+		match string.find("- [ ]") {
+			Some(_) => {
+				let stripped = string.strip_prefix("- [ ] ").unwrap_or("");
+				Item::new(String::from(stripped))
+			}
+			_ => {
+				let stripped = string.strip_prefix("- [x] ").unwrap_or("");
+				let mut item = Item::new(String::from(stripped));
+				item.state = State::Done;
+				item
+			}
+		}
+	}
 	pub fn to_line(&self, index: usize) -> Line {
 		let mut string = String::from(&self.description);
 		Line {

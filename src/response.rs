@@ -1,6 +1,7 @@
+use crate::item::Item;
 use crate::output::{Color, ColoredString, Output, Outputtable};
-use crate::Item;
 use std::fs;
+
 pub enum ResponseType {
 	Exit,
 	Continue,
@@ -27,19 +28,28 @@ impl Respond<String> for StringResponse<'_> {
 	}
 }
 
-pub struct ErrorResponse {
+pub struct ErrorResponse<'a> {
+	pub list: &'a Vec<Item>,
 	pub error_msg: String,
 }
 
-impl Respond<String> for ErrorResponse {
+impl Respond<String> for ErrorResponse<'_> {
 	fn to_output(&self) -> Output<String> {
-		Output {
-			kind: ResponseType::Error,
-			value: ColoredString {
+		let mut string = String::new();
+		for (index, item) in self.list.iter().enumerate() {
+			string.push_str(&String::from(item.to_line(index)));
+			string.push_str("\n");
+		}
+		string.push_str(
+			&*ColoredString {
 				color: Color::Red,
 				string: String::from(&self.error_msg),
 			}
 			.show(),
+		);
+		Output {
+			kind: ResponseType::Error,
+			value: string,
 		}
 	}
 }
@@ -115,13 +125,18 @@ impl Respond<String> for SaveResponse<'_> {
 	fn to_output(&self) -> Output<String> {
 		let mut string = String::new();
 		for item in self.list.iter() {
-			string.push_str(&String::from(item.to_string()));
-			string.push_str("\n");
+			string.push_str(&String::from(item.to_string() + "\n"));
 		}
 		fs::write("TODO.md", string).unwrap();
+
+		let mut string = String::new();
+		for (index, item) in self.list.iter().enumerate() {
+			string.push_str(&String::from(item.to_line(index)));
+			string.push_str("\n");
+		}
 		Output {
 			kind: ResponseType::Continue,
-			value: String::from("wrote list to TODO.md"),
+			value: String::from(string + "wrote list to TODO.md"),
 		}
 	}
 }

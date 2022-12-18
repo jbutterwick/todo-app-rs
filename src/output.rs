@@ -49,6 +49,14 @@ impl From<State> for Color {
 		}
 	}
 }
+impl From<&State> for Color {
+	fn from(state: &State) -> Self {
+		match state {
+			State::Todo => Color::Blue,
+			State::Done => Color::Green,
+		}
+	}
+}
 
 impl From<String> for ColoredString {
 	fn from(str: String) -> Self {
@@ -64,6 +72,14 @@ impl From<Item> for ColoredString {
 		ColoredString {
 			color: Color::from(item.state),
 			string: item.description,
+		}
+	}
+}
+impl From<&Item> for ColoredString {
+	fn from(item: &Item) -> Self {
+		ColoredString {
+			color: Color::from(&item.state),
+			string: String::from(&item.description),
 		}
 	}
 }
