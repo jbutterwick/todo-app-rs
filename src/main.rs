@@ -1,7 +1,6 @@
 extern crate core;
 
 mod item;
-mod output;
 mod response;
 mod todo;
 

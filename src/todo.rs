@@ -1,8 +1,7 @@
 use crate::item::{Item, State};
-use crate::output::Output;
 use crate::response::{
-	ErrorResponse, ExitResponse, HelpResponse, ListResponse, NoResponse, Respond, ResponseType,
-	SaveResponse,
+	ErrorResponse, ExitResponse, HelpResponse, ListResponse, NoResponse, Output, Respond,
+	ResponseType, SaveResponse,
 };
 use crossterm::{cursor, terminal, ExecutableCommand, QueueableCommand};
 use std::io::{stdin, stdout, Write};
@@ -71,7 +70,7 @@ impl Todo {
 		}
 	}
 
-	fn dispatch(&mut self, input: String) -> Output<String> {
+	fn dispatch(&mut self, input: String) -> Output {
 		if input == String::new() {
 			return NoResponse {}.to_output();
 		}
@@ -85,17 +84,15 @@ impl Todo {
 		{
 			Some((first, tail)) => match *first {
 				"help" => HelpResponse {
-					help_msg: "
-							Available commands:
-							help    | h                                 Displays this help message
-							list    | l                                 Display the todo list
-							add     | a  <todo item description>        Adds the item to the todo list
-							remove  | rm <item index or description>    Removes the item from the todo list
-							done    | d  <item index or description>    Marks the item as done
-							flip    | f  <item index or description>    Flips the items done state
-							save    | s                                 Saves the entire list to `TODO.md`
-							quit    | q                                 Exit the program
-							",
+					help_msg: "Available commands:
+help    | h                                 Displays this help message
+list    | l                                 Display the todo list
+add     | a  <todo item description>        Adds the item to the todo list
+remove  | rm <item index or description>    Removes the item from the todo list
+done    | d  <item index or description>    Marks the item as done
+flip    | f  <item index or description>    Flips the items done state
+save    | s                                 Saves the entire list to `TODO.md`
+quit    | q                                 Exit the program",
 				}
 				.to_output(),
 
