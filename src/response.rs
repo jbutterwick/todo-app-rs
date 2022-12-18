@@ -75,6 +75,13 @@ pub struct ExitResponse<'a> {
 
 impl Respond for ExitResponse<'_> {
 	fn to_output(&self) -> Output {
+
+		let mut string = String::new();
+		for item in self.list.iter() {
+			string.push_str(&String::from(item.to_string() + "\n"));
+		}
+		fs::write("TODO.md", string).unwrap();
+
 		Output {
 			kind: ResponseType::Exit,
 			value: String::from(self.exit_msg).blue().to_string(),
