@@ -70,12 +70,12 @@ impl Respond for NoResponse {
 }
 
 pub struct ExitResponse<'a> {
+	pub list: &'a Vec<Item>,
 	pub exit_msg: &'a str,
 }
 
 impl Respond for ExitResponse<'_> {
 	fn to_output(&self) -> Output {
-
 		let mut string = String::new();
 		for item in self.list.iter() {
 			string.push_str(&String::from(item.to_string() + "\n"));

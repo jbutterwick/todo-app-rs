@@ -3,7 +3,7 @@ use crate::response::{
 	ErrorResponse, ExitResponse, HelpResponse, ListResponse, NoResponse, Output, Respond,
 	ResponseType, SaveResponse,
 };
-use crossterm::{cursor, terminal, ExecutableCommand, QueueableCommand};
+use crossterm::{cursor, terminal, QueueableCommand};
 use std::io::{stdin, stdout, Write};
 
 pub struct Todo {
@@ -19,19 +19,15 @@ impl Todo {
 		let item_list = existing_list.split("\n").collect::<Vec<&str>>();
 		let mut item_vec = vec![];
 		for item in item_list {
-			if item != "\n" {
+			if item != "" {
 				item_vec.push(Item::parse(item))
 			}
 		}
-
 		Todo { item_vec }
 	}
 
 	pub(crate) fn todo_loop(todo: &mut Todo) -> () {
 		let mut stdout = stdout();
-		stdout
-			.execute(terminal::Clear(terminal::ClearType::All))
-			.unwrap();
 		loop {
 			stdout.queue(cursor::SavePosition).unwrap();
 			let mut command = String::new();
@@ -107,6 +103,7 @@ quit    | q                                 Exit the program",
 				.to_output(),
 
 				"quit" | "exit" | "q" | "e" => ExitResponse {
+					list: &self.item_vec,
 					exit_msg: "buh-bye!",
 				}
 				.to_output(),
