@@ -1,6 +1,6 @@
 [package]
 name = "todo-app-rs"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 authors = [
     "jordan <jordan@butterwick.tech>"
@@ -9,4 +9,4 @@ readme = "./README.md"
 license = "Unlicense"
 
 [dependencies]
-crossterm = "0.25.0"
+crossterm = "0.26.1"

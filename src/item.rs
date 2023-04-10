@@ -58,7 +58,7 @@ impl Item {
 				string.yellow().to_string()
 			},
 			suffix: if self.state == State::Done {
-				Some(String::from("(done)"))
+				Some(String::from(" (done)"))
 			} else {
 				None
 			},
