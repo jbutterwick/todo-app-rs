@@ -10,9 +10,11 @@ A blazingly Fast Todo App built with Rust
 
 Currently, the following commands are supported:
 
-     help                              Displays this help message
-     list                              Display the todo list
-     add <todo item description>       Adds the item to the todo list
-     done <todo item number>           Marks the item as done
-     save                              Saves the entire list to `todo.md`
-     quit                              Exit the program
+      help    | h                                 Displays this help message
+      list    | l                                 Display the todo list
+      add     | a  <todo item description>        Adds the item to the todo list
+      remove  | rm <item index or description>    Removes the item from the todo list
+      done    | d  <item index or description>    Marks the item as done
+      flip    | f  <item index or description>    Flips the items done state
+      save    | s                                 Saves the entire list to `TODO.md`
+      quit    | q                                 Exit the program
