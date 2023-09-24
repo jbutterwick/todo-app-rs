@@ -109,14 +109,22 @@ pub struct ListResponse<'a> {
 impl Respond for ListResponse<'_> {
 	fn to_output(&self) -> Output {
 		let mut string = String::new();
-		for (index, item) in self.list.iter().enumerate() {
-			string.push_str(&String::from(item.to_line(index)));
-			string.push_str("\n");
+		if !&self.list.is_empty() {
+			for (index, item) in self.list.iter().enumerate() {
+				string.push_str(&String::from(item.to_line(index)));
+				string.push_str("\n");
+			}
+			Output {
+				kind: ResponseType::Continue,
+				value: string,
+			}
+		} else {
+			Output {
+				kind: ResponseType::Continue,
+				value: String::from("your todo list has no items, add one with the `add` command"),
+			}
 		}
-		Output {
-			kind: ResponseType::Continue,
-			value: string,
-		}
+
 	}
 }
 

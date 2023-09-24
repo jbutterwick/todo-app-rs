@@ -3,7 +3,6 @@ use crate::response::{
 	ErrorResponse, ExitResponse, HelpResponse, ListResponse, NoResponse, Output, Respond,
 	ResponseType, SaveResponse,
 };
-use crossterm::{cursor, terminal, QueueableCommand};
 use std::io::{stdin, stdout, Write};
 
 pub struct Todo {
@@ -19,7 +18,7 @@ impl Todo {
 		let item_list = existing_list.split("\n").collect::<Vec<&str>>();
 		let mut item_vec = vec![];
 		for item in item_list {
-			if item != "" {
+			if !item.is_empty() {
 				item_vec.push(Item::parse(item))
 			}
 		}
@@ -28,8 +27,9 @@ impl Todo {
 
 	pub(crate) fn todo_loop(todo: &mut Todo) -> () {
 		let mut stdout = stdout();
+		stdout.write("welcome to todo_rs! type `help` to see the list of commands\n".as_bytes()).unwrap();
+		stdout.flush().unwrap();
 		loop {
-			stdout.queue(cursor::SavePosition).unwrap();
 			let mut command = String::new();
 			stdin()
 				.read_line(&mut command)
@@ -39,7 +39,7 @@ impl Todo {
 					kind: ResponseType::Continue,
 					value,
 				} => {
-					if value != String::new() {
+					if !value.is_empty() {
 						stdout.write_all(format!("{}", &value).as_bytes()).unwrap();
 					}
 				}
@@ -57,12 +57,8 @@ impl Todo {
 					stdout.write_all(value.as_bytes()).unwrap();
 				}
 			}
-			stdout.write_all("\n>".as_bytes()).unwrap();
+			stdout.write("\n>".as_bytes()).unwrap();
 			stdout.flush().unwrap();
-			stdout.queue(cursor::RestorePosition).unwrap();
-			stdout
-				.queue(terminal::Clear(terminal::ClearType::FromCursorUp))
-				.unwrap();
 		}
 	}
 
@@ -79,7 +75,7 @@ impl Todo {
 			.split_first()
 		{
 			Some((first, tail)) => match *first {
-				"help" => HelpResponse {
+				"help" | "h" => HelpResponse {
 					help_msg: "Available commands:
 help    | h                                 Displays this help message
 list    | l                                 Display the todo list

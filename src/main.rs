@@ -5,13 +5,8 @@ mod response;
 mod todo;
 
 use crate::todo::Todo;
-use crossterm::{ExecutableCommand, terminal};
 
 fn main() {
-	let mut stdout = std::io::stdout();
-	stdout
-		.execute(terminal::Clear(terminal::ClearType::All))
-		.unwrap();
 	match std::fs::read_to_string("TODO.md") {
 		Ok(existing_list) => {
 			let mut todo = Todo::from_existing(existing_list);
