@@ -1,5 +1,3 @@
-extern crate core;
-
 mod item;
 mod response;
 mod todo;
@@ -7,21 +5,17 @@ mod todo;
 use crate::todo::Todo;
 
 fn main() {
-	match std::fs::read_to_string("TODO.md") {
-		Ok(existing_list) => {
-			let mut todo = Todo::from_existing(existing_list);
-			let mut string = String::new();
-			for (index, item) in todo.item_vec.iter().enumerate() {
-				string.push_str(&String::from(item.to_line(index)));
-				string.push_str("\n");
-			}
-			println!("found existing list!");
-			println!("{}", string);
-			Todo::todo_loop(&mut todo)
+	if let Ok(existing_list) = std::fs::read_to_string("todo.xit") {
+		let mut todo = Todo::from_existing(&existing_list);
+		let mut string = String::new();
+		for item in &todo.item_vec {
+			string.push_str(item.to_string().as_str());
+			string.push('\n');
 		}
-		Err(_) => {
-			let mut todo = Todo::new();
-			Todo::todo_loop(&mut todo)
-		}
+		println!("{string}");
+		Todo::todo_loop(&mut todo);
+	} else {
+		let mut todo = Todo::new();
+		Todo::todo_loop(&mut todo);
 	};
 }
