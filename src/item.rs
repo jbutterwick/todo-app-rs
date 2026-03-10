@@ -1,9 +1,7 @@
-use crate::response::Error;
 use chrono::NaiveDate;
 use crossterm::style::Stylize;
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::fs;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Status {
@@ -63,7 +61,7 @@ impl Item {
 		}
 	}
 
-	fn parse_dates(date_string: &str) -> Option<NaiveDate> {
+	pub fn parse_dates(date_string: &str) -> Option<NaiveDate> {
 		for format in [
 			"%Y-%m-%d", "%Y/%m/%d", "%Y-%m", "%Y/%m", "%Y", "%Y-W%U", "%Y/W%U", "%Y-Q%q", "%Y/Q%q",
 		] {
@@ -230,6 +228,18 @@ impl PartialOrd<Self> for Item {
 
 impl Ord for Item {
 	fn cmp(&self, other: &Self) -> Ordering {
-		String::cmp(&self.description, &other.description)
+		fn status_rank(s: &Status) -> u8 {
+			match s {
+				Status::Ongoing => 0,
+				Status::Open => 1,
+				Status::InQuestion => 2,
+				Status::Checked => 3,
+				Status::Obsolete => 4,
+			}
+		}
+		status_rank(&self.state)
+			.cmp(&status_rank(&other.state))
+			.then(other.priority.cmp(&self.priority))
+			.then(self.description.cmp(&other.description))
 	}
 }

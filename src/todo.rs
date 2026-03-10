@@ -1,17 +1,22 @@
 use crate::item::{Item, Status};
-use crate::response::{Empty, Error, Exit, Help, Kind, List, Output, Respond, Save};
+use crate::response::{Kind, Output, Response};
+use std::fs;
 use std::io::{stdin, stdout, Write};
 
 pub struct Todo {
 	pub item_vec: Vec<Item>,
+	pub file_path: String,
 }
 
 impl Todo {
-	pub(crate) const fn new() -> Self {
-		Self { item_vec: vec![] }
+	pub(crate) fn new(file_path: String) -> Self {
+		Self {
+			item_vec: vec![],
+			file_path,
+		}
 	}
 
-	pub(crate) fn from_existing(existing_list: &str) -> Self {
+	pub(crate) fn from_existing(existing_list: &str, file_path: String) -> Self {
 		let item_list = existing_list.lines().collect::<Vec<&str>>();
 		let mut item_vec = vec![];
 		for item in item_list {
@@ -20,7 +25,28 @@ impl Todo {
 				item_vec.push(Item::parse_line(item));
 			}
 		}
-		Self { item_vec }
+		Self {
+			item_vec,
+			file_path,
+		}
+	}
+
+	fn save_to_file(&self) -> Result<(), String> {
+		let mut file_string = String::new();
+		for item in &self.item_vec {
+			file_string.push_str(&(item.get_file_string() + "\n"));
+		}
+		fs::write(&self.file_path, file_string)
+			.map_err(|e| format!("failed to write {}: {e}", self.file_path))
+	}
+
+	fn export_to_md(&self) -> Result<(), String> {
+		let mut string = String::new();
+		for item in &self.item_vec {
+			string.push_str(&(item.to_string() + "\n"));
+		}
+		fs::write("TODO.md", string)
+			.map_err(|e| format!("failed to write TODO.md: {e}"))
 	}
 
 	pub(crate) fn todo_loop(todo: &mut Self) {
@@ -34,13 +60,48 @@ impl Todo {
 			stdin()
 				.read_line(&mut command)
 				.expect("Failed to read command");
-			match todo.dispatch(&command) {
+			let response = todo.dispatch(&command);
+
+			// Handle file I/O for save/exit before rendering
+			match &response {
+				Response::Save => {
+					match todo.save_to_file() {
+						Ok(_) => {
+							let output = response.render(&todo.item_vec);
+							stdout.write_all(output.value.as_bytes()).unwrap();
+							stdout
+								.write_all(
+									format!("wrote list to {}\n", todo.file_path)
+										.as_bytes(),
+								)
+								.unwrap();
+							stdout.flush().unwrap();
+							continue;
+						}
+						Err(e) => {
+							let output = Response::Error(e).render(&todo.item_vec);
+							stdout.write_all(output.value.as_bytes()).unwrap();
+							stdout.write_all(b"\n").unwrap();
+							stdout.flush().unwrap();
+							continue;
+						}
+					}
+				}
+				Response::Exit => {
+					let _ = todo.save_to_file();
+					let _ = todo.export_to_md();
+				}
+				_ => {}
+			}
+
+			let output = response.render(&todo.item_vec);
+			match output {
 				Output {
 					kind: Kind::Continue,
 					value,
 				} => {
 					if !value.is_empty() {
-						stdout.write_all(value.to_string().as_bytes()).unwrap();
+						stdout.write_all(value.as_bytes()).unwrap();
 					}
 				}
 				Output {
@@ -62,9 +123,9 @@ impl Todo {
 		}
 	}
 
-	fn dispatch(&mut self, input: &str) -> Output {
+	fn dispatch(&mut self, input: &str) -> Response {
 		if input == String::new() {
-			return Empty {}.to_output();
+			return Response::Empty;
 		}
 
 		match input
@@ -75,11 +136,12 @@ impl Todo {
 			.split_first()
 		{
 			Some((first, tail)) => match *first {
-				"help" | "h" => Help {
-					help_msg: "Available commands:
+				"help" | "h" => Response::Help(
+					"Available commands:
 help     | h                         Displays this help message
 list     | l                         Display the todo list
 add      | a | + <item description>  Adds the item to the todo list
+edit     | e <index> <new desc>       Edits an item's description
 remove   | r | - <item>              Removes the item from the todo list
 done     | x <item>                  Marks the item as done
 undo     | o <item>                  Marks the item as not done
@@ -88,320 +150,186 @@ ongoing  | @ <item>                  Marks the item as ongoing
 question | ? <item>                  Marks the item as question
 duedate  | d <date> <item>           Gives the item a due date
 priority | p <-|+> <priority> <item> Adds or subtracts priority from the item
-save     | s <name=todo.xit>         Saves the entire list to specified filename
+sort                                  Sorts the list by status, priority, name
+filter   | f <status>                Filters list by status (open|done|ongoing|obsolete|question)
+save     | s                         Saves the list to file
 quit     | q                         Exit the program",
-				}
-				.to_output(),
+				),
 
-				"list" | "l" => List {
-					list: &self.item_vec,
-				}
-				.to_output(),
+				"list" | "l" => Response::List,
 
-				"save" | "s" => Save {
-					list: &self.item_vec,
+				"sort" => {
+					self.item_vec.sort();
+					Response::List
 				}
-				.to_output(),
 
-				"quit" | "q" => Exit {
-					list: &self.item_vec,
-					exit_msg: "buh-bye!",
+				"filter" | "f" => {
+					if tail.is_empty() {
+						return Response::Error(String::from(
+							"usage: filter <open|done|ongoing|obsolete|question>",
+						));
+					}
+					let status_filter = match tail[0] {
+						"open" => Status::Open,
+						"done" | "checked" => Status::Checked,
+						"ongoing" => Status::Ongoing,
+						"obsolete" => Status::Obsolete,
+						"question" => Status::InQuestion,
+						other => {
+							return Response::Error(format!("unknown status: {other}"))
+						}
+					};
+					let mut filtered = String::new();
+					for item in &self.item_vec {
+						if item.state == status_filter {
+							filtered.push_str(&(item.to_string() + "\n"));
+						}
+					}
+					if filtered.is_empty() {
+						Response::Continue(String::from("no items match that filter"))
+					} else {
+						Response::Continue(filtered)
+					}
 				}
-				.to_output(),
+
+				"save" | "s" => Response::Save,
+
+				"quit" | "q" => Response::Exit,
 
 				"add" | "a" | "+" => {
 					let string_tail = tail.join(" ");
 					if string_tail.is_empty() {
-						Error {
-							list: &self.item_vec,
-							error_msg: String::from("Please enter description"),
-						}
-						.to_output()
+						Response::Error(String::from("Please enter description"))
 					} else {
 						self.item_vec.push(Item::from(&*string_tail));
-						List {
-							list: &self.item_vec,
-						}
-						.to_output()
+						Response::List
 					}
+				}
+
+				"edit" | "e" => {
+					if tail.is_empty() {
+						return Response::Error(String::from(
+							"usage: edit <index> <new description>",
+						));
+					}
+					let index_str = tail[0];
+					let new_desc = tail[1..].join(" ");
+					if new_desc.is_empty() {
+						return Response::Error(String::from(
+							"please provide a new description",
+						));
+					}
+					match index_str.parse::<usize>() {
+						Ok(num) => match self.item_vec.get_mut(num - 1) {
+							Some(item) => item.description = new_desc,
+							_ => {
+								return Response::Error(format!(
+									"unable to find item {num}"
+								))
+							}
+						},
+						_ => {
+							return Response::Error(String::from(
+								"edit requires a numeric index",
+							))
+						}
+					};
+					Response::List
 				}
 
 				"done" | "x" => {
 					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => {
-								if item.state == Status::Open {
-									item.state = Status::Checked;
-								} else {
-									item.state = Status::Open;
-								}
-							}
-							_ => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {num}"),
-								}
-								.to_output()
-							}
-						},
-						_ => match self
-							.item_vec
-							.iter_mut()
-							.find(|item| item.description == string_index)
-						{
-							Some(item) => {
-								if item.state == Status::Open {
-									item.state = Status::Checked;
-								} else {
-									item.state = Status::Open;
-								}
-							}
-							None => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {string_index}"),
-								}
-								.to_output()
-							}
-						},
-					};
-
-					List {
-						list: &self.item_vec,
-					}
+					self.find_and_update(&string_index, |item| {
+						item.state = if item.state == Status::Checked {
+							Status::Open
+						} else {
+							Status::Checked
+						};
+					})
 				}
-				.to_output(),
 
 				"undo" | "o" => {
 					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => item.state = Status::Open,
-							_ => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {num}"),
-								}
-								.to_output()
-							}
-						},
-						_ => match self
-							.item_vec
-							.iter_mut()
-							.find(|item| item.description == string_index)
-						{
-							Some(item) => item.state = Status::Open,
-							None => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {string_index}"),
-								}
-								.to_output()
-							}
-						},
-					};
-
-					List {
-						list: &self.item_vec,
-					}
+					self.find_and_update(&string_index, |item| {
+						item.state = Status::Open;
+					})
 				}
-				.to_output(),
 
 				"ongoing" | "@" => {
 					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => item.state = Status::Ongoing,
-							_ => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {num}"),
-								}
-								.to_output()
-							}
-						},
-						_ => match self
-							.item_vec
-							.iter_mut()
-							.find(|item| item.description == string_index)
-						{
-							Some(item) => item.state = Status::Ongoing,
-							None => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {string_index}"),
-								}
-								.to_output()
-							}
-						},
-					};
-
-					List {
-						list: &self.item_vec,
-					}
+					self.find_and_update(&string_index, |item| {
+						item.state = Status::Ongoing;
+					})
 				}
-				.to_output(),
 
 				"obsolete" | "~" => {
 					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => item.state = Status::Obsolete,
-							_ => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {num}"),
-								}
-								.to_output()
-							}
-						},
-						_ => match self
-							.item_vec
-							.iter_mut()
-							.find(|item| item.description == string_index)
-						{
-							Some(item) => item.state = Status::Obsolete,
-							None => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {string_index}"),
-								}
-								.to_output()
-							}
-						},
-					};
-
-					List {
-						list: &self.item_vec,
-					}
+					self.find_and_update(&string_index, |item| {
+						item.state = Status::Obsolete;
+					})
 				}
-				.to_output(),
 
 				"question" | "?" => {
 					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => item.state = Status::InQuestion,
-							_ => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {num}"),
-								}
-								.to_output()
-							}
-						},
-						_ => match self
-							.item_vec
-							.iter_mut()
-							.find(|item| item.description == string_index)
-						{
-							Some(item) => item.state = Status::InQuestion,
-							None => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {string_index}"),
-								}
-								.to_output()
-							}
-						},
-					};
-
-					List {
-						list: &self.item_vec,
-					}
+					self.find_and_update(&string_index, |item| {
+						item.state = Status::InQuestion;
+					})
 				}
-				.to_output(),
 
 				"duedate" | "d" => {
-					// TODO THIS DOES NOTHING USEFUL
-					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => {}
-							_ => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {num}"),
-								}
-								.to_output()
-							}
-						},
-						_ => match self
-							.item_vec
-							.iter_mut()
-							.find(|item| item.description == string_index)
-						{
-							Some(item) => {}
-							None => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {string_index}"),
-								}
-								.to_output()
-							}
-						},
-					};
-
-					List {
-						list: &self.item_vec,
+					if tail.is_empty() {
+						return Response::Error(String::from(
+							"usage: duedate <date> <item>",
+						));
 					}
+					let date_str = tail[0];
+					let date = Item::parse_dates(date_str);
+					if date.is_none() {
+						return Response::Error(format!(
+							"unable to parse date: {date_str}"
+						));
+					}
+					let item_index = tail[1..].join(" ");
+					if item_index.is_empty() {
+						return Response::Error(String::from("please specify an item"));
+					}
+					self.find_and_update(&item_index, |item| {
+						item.due_date = date;
+					})
 				}
-				.to_output(),
 
 				"priority" | "p" => {
+					if tail.is_empty() {
+						return Response::Error(String::from(
+							"usage: priority <!!...> <item>",
+						));
+					}
 					let mut priority = 0;
-
-					for char in tail.iter().next().unwrap().chars() {
+					for char in tail[0].chars() {
 						match char {
 							'.' => continue,
 							'!' => priority += 1,
 							_ => break,
 						}
 					}
-
-					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => {
-								item.priority = priority;
-							}
-							_ => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {num}"),
-								}
-								.to_output()
-							}
-						},
-						_ => match self
-							.item_vec
-							.iter_mut()
-							.find(|item| item.description == string_index)
-						{
-							Some(item) => {
-								item.priority = priority;
-							}
-							None => {
-								return Error {
-									list: &self.item_vec,
-									error_msg: format!("unable to find item {string_index}"),
-								}
-								.to_output()
-							}
-						},
-					};
-
-					List {
-						list: &self.item_vec,
+					let string_index = tail[1..].join(" ");
+					if string_index.is_empty() {
+						return Response::Error(String::from("please specify an item"));
 					}
+					self.find_and_update(&string_index, |item| {
+						item.priority = priority;
+					})
 				}
-				.to_output(),
 
 				"remove" | "r" | "-" => {
 					let string_index = tail.join(" ");
 					match string_index.parse::<usize>() {
 						Ok(num) => {
+							if num == 0 || num > self.item_vec.len() {
+								return Response::Error(format!(
+									"unable to find item {num}"
+								));
+							}
 							self.item_vec.remove(num - 1);
 						}
 						_ => {
@@ -409,24 +337,41 @@ quit     | q                         Exit the program",
 								.retain(|item| item.description != string_index);
 						}
 					}
-
-					List {
-						list: &self.item_vec,
-					}
+					Response::List
 				}
-				.to_output(),
 
-				arg => Error {
-					list: &self.item_vec,
-					error_msg: format!("unknown argument: {arg}"),
-				}
-				.to_output(),
+				arg => Response::Error(format!("unknown argument: {arg}")),
 			},
-			_ => Error {
-				list: &self.item_vec,
-				error_msg: String::from("no argument made"),
-			}
-			.to_output(),
+			_ => Response::Error(String::from("no argument made")),
+		}
+	}
+
+	fn find_and_update(
+		&mut self,
+		index_or_name: &str,
+		update: impl FnOnce(&mut Item),
+	) -> Response {
+		match index_or_name.parse::<usize>() {
+			Ok(num) => match self.item_vec.get_mut(num - 1) {
+				Some(item) => {
+					update(item);
+					Response::List
+				}
+				_ => Response::Error(format!("unable to find item {num}")),
+			},
+			_ => match self
+				.item_vec
+				.iter_mut()
+				.find(|item| item.description == index_or_name)
+			{
+				Some(item) => {
+					update(item);
+					Response::List
+				}
+				None => {
+					Response::Error(format!("unable to find item {index_or_name}"))
+				}
+			},
 		}
 	}
 }
