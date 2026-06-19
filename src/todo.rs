@@ -1,7 +1,6 @@
 use crate::item::{Item, Status};
-use crate::response::{Kind, Output, Response};
+use chrono::NaiveDate;
 use std::fs;
-use std::io::{stdin, stdout, Write};
 
 pub struct Todo {
 	pub item_vec: Vec<Item>,
@@ -9,29 +8,26 @@ pub struct Todo {
 }
 
 impl Todo {
-	pub(crate) fn new(file_path: String) -> Self {
+	pub fn new(file_path: String) -> Self {
 		Self {
 			item_vec: vec![],
 			file_path,
 		}
 	}
 
-	pub(crate) fn from_existing(existing_list: &str, file_path: String) -> Self {
-		let item_list = existing_list.lines().collect::<Vec<&str>>();
-		let mut item_vec = vec![];
-		for item in item_list {
-			if !item.is_empty() || item.ne("\n") {
-				println!("{}", item);
-				item_vec.push(Item::parse_line(item));
-			}
-		}
+	pub fn from_existing(existing_list: &str, file_path: String) -> Self {
+		let item_vec = existing_list
+			.lines()
+			.filter(|line| !line.is_empty())
+			.map(Item::parse_line)
+			.collect();
 		Self {
 			item_vec,
 			file_path,
 		}
 	}
 
-	fn save_to_file(&self) -> Result<(), String> {
+	pub fn save_to_file(&self) -> Result<(), String> {
 		let mut file_string = String::new();
 		for item in &self.item_vec {
 			file_string.push_str(&(item.get_file_string() + "\n"));
@@ -40,338 +36,166 @@ impl Todo {
 			.map_err(|e| format!("failed to write {}: {e}", self.file_path))
 	}
 
-	fn export_to_md(&self) -> Result<(), String> {
+	pub fn export_to_md(&self) -> Result<(), String> {
 		let mut string = String::new();
 		for item in &self.item_vec {
-			string.push_str(&(item.to_string() + "\n"));
+			string.push_str(&(item.get_file_string() + "\n"));
 		}
-		fs::write("TODO.md", string)
-			.map_err(|e| format!("failed to write TODO.md: {e}"))
+		fs::write("TODO.md", string).map_err(|e| format!("failed to write TODO.md: {e}"))
 	}
 
-	pub(crate) fn todo_loop(todo: &mut Self) {
-		let mut stdout = stdout();
-		stdout
-			.write_all("welcome to todo_rs! type `help` to see the list of commands\n".as_bytes())
-			.unwrap();
-		stdout.flush().unwrap();
-		loop {
-			let mut command = String::new();
-			stdin()
-				.read_line(&mut command)
-				.expect("Failed to read command");
-			let response = todo.dispatch(&command);
+	// ---- index-based mutations (the UI passes the selected real index) ----
 
-			// Handle file I/O for save/exit before rendering
-			match &response {
-				Response::Save => {
-					match todo.save_to_file() {
-						Ok(_) => {
-							let output = response.render(&todo.item_vec);
-							stdout.write_all(output.value.as_bytes()).unwrap();
-							stdout
-								.write_all(
-									format!("wrote list to {}\n", todo.file_path)
-										.as_bytes(),
-								)
-								.unwrap();
-							stdout.flush().unwrap();
-							continue;
-						}
-						Err(e) => {
-							let output = Response::Error(e).render(&todo.item_vec);
-							stdout.write_all(output.value.as_bytes()).unwrap();
-							stdout.write_all(b"\n").unwrap();
-							stdout.flush().unwrap();
-							continue;
-						}
-					}
-				}
-				Response::Exit => {
-					let _ = todo.save_to_file();
-					let _ = todo.export_to_md();
-				}
-				_ => {}
-			}
+	pub fn add(&mut self, description: String) {
+		self.item_vec.push(Item::from(description.as_str()));
+	}
 
-			let output = response.render(&todo.item_vec);
-			match output {
-				Output {
-					kind: Kind::Continue,
-					value,
-				} => {
-					if !value.is_empty() {
-						stdout.write_all(value.as_bytes()).unwrap();
-					}
-				}
-				Output {
-					kind: Kind::Exit,
-					value: _,
-				} => {
-					stdout.write_all(b"goodbye!").unwrap();
-					break;
-				}
-				Output {
-					kind: Kind::Error,
-					value,
-				} => {
-					stdout.write_all(value.as_bytes()).unwrap();
-				}
-			}
-			stdout.write_all(b"\n").unwrap();
-			stdout.flush().unwrap();
+	pub fn edit(&mut self, index: usize, description: String) {
+		if let Some(item) = self.item_vec.get_mut(index) {
+			item.description = description;
 		}
 	}
 
-	fn dispatch(&mut self, input: &str) -> Response {
-		if input == String::new() {
-			return Response::Empty;
-		}
-
-		match input
-			.trim()
-			.to_lowercase()
-			.split_whitespace()
-			.collect::<Vec<&str>>()
-			.split_first()
-		{
-			Some((first, tail)) => match *first {
-				"help" | "h" => Response::Help(
-					"Available commands:
-help     | h                         Displays this help message
-list     | l                         Display the todo list
-add      | a | + <item description>  Adds the item to the todo list
-edit     | e <index> <new desc>       Edits an item's description
-remove   | r | - <item>              Removes the item from the todo list
-done     | x <item>                  Marks the item as done
-undo     | o <item>                  Marks the item as not done
-obsolete | ~ <item>                  Marks the item as obsolete
-ongoing  | @ <item>                  Marks the item as ongoing
-question | ? <item>                  Marks the item as question
-duedate  | d <date> <item>           Gives the item a due date
-priority | p <-|+> <priority> <item> Adds or subtracts priority from the item
-sort                                  Sorts the list by status, priority, name
-filter   | f <status>                Filters list by status (open|done|ongoing|obsolete|question)
-save     | s                         Saves the list to file
-quit     | q                         Exit the program",
-				),
-
-				"list" | "l" => Response::List,
-
-				"sort" => {
-					self.item_vec.sort();
-					Response::List
-				}
-
-				"filter" | "f" => {
-					if tail.is_empty() {
-						return Response::Error(String::from(
-							"usage: filter <open|done|ongoing|obsolete|question>",
-						));
-					}
-					let status_filter = match tail[0] {
-						"open" => Status::Open,
-						"done" | "checked" => Status::Checked,
-						"ongoing" => Status::Ongoing,
-						"obsolete" => Status::Obsolete,
-						"question" => Status::InQuestion,
-						other => {
-							return Response::Error(format!("unknown status: {other}"))
-						}
-					};
-					let mut filtered = String::new();
-					for item in &self.item_vec {
-						if item.state == status_filter {
-							filtered.push_str(&(item.to_string() + "\n"));
-						}
-					}
-					if filtered.is_empty() {
-						Response::Continue(String::from("no items match that filter"))
-					} else {
-						Response::Continue(filtered)
-					}
-				}
-
-				"save" | "s" => Response::Save,
-
-				"quit" | "q" => Response::Exit,
-
-				"add" | "a" | "+" => {
-					let string_tail = tail.join(" ");
-					if string_tail.is_empty() {
-						Response::Error(String::from("Please enter description"))
-					} else {
-						self.item_vec.push(Item::from(&*string_tail));
-						Response::List
-					}
-				}
-
-				"edit" | "e" => {
-					if tail.is_empty() {
-						return Response::Error(String::from(
-							"usage: edit <index> <new description>",
-						));
-					}
-					let index_str = tail[0];
-					let new_desc = tail[1..].join(" ");
-					if new_desc.is_empty() {
-						return Response::Error(String::from(
-							"please provide a new description",
-						));
-					}
-					match index_str.parse::<usize>() {
-						Ok(num) => match self.item_vec.get_mut(num - 1) {
-							Some(item) => item.description = new_desc,
-							_ => {
-								return Response::Error(format!(
-									"unable to find item {num}"
-								))
-							}
-						},
-						_ => {
-							return Response::Error(String::from(
-								"edit requires a numeric index",
-							))
-						}
-					};
-					Response::List
-				}
-
-				"done" | "x" => {
-					let string_index = tail.join(" ");
-					self.find_and_update(&string_index, |item| {
-						item.state = if item.state == Status::Checked {
-							Status::Open
-						} else {
-							Status::Checked
-						};
-					})
-				}
-
-				"undo" | "o" => {
-					let string_index = tail.join(" ");
-					self.find_and_update(&string_index, |item| {
-						item.state = Status::Open;
-					})
-				}
-
-				"ongoing" | "@" => {
-					let string_index = tail.join(" ");
-					self.find_and_update(&string_index, |item| {
-						item.state = Status::Ongoing;
-					})
-				}
-
-				"obsolete" | "~" => {
-					let string_index = tail.join(" ");
-					self.find_and_update(&string_index, |item| {
-						item.state = Status::Obsolete;
-					})
-				}
-
-				"question" | "?" => {
-					let string_index = tail.join(" ");
-					self.find_and_update(&string_index, |item| {
-						item.state = Status::InQuestion;
-					})
-				}
-
-				"duedate" | "d" => {
-					if tail.is_empty() {
-						return Response::Error(String::from(
-							"usage: duedate <date> <item>",
-						));
-					}
-					let date_str = tail[0];
-					let date = Item::parse_dates(date_str);
-					if date.is_none() {
-						return Response::Error(format!(
-							"unable to parse date: {date_str}"
-						));
-					}
-					let item_index = tail[1..].join(" ");
-					if item_index.is_empty() {
-						return Response::Error(String::from("please specify an item"));
-					}
-					self.find_and_update(&item_index, |item| {
-						item.due_date = date;
-					})
-				}
-
-				"priority" | "p" => {
-					if tail.is_empty() {
-						return Response::Error(String::from(
-							"usage: priority <!!...> <item>",
-						));
-					}
-					let mut priority = 0;
-					for char in tail[0].chars() {
-						match char {
-							'.' => continue,
-							'!' => priority += 1,
-							_ => break,
-						}
-					}
-					let string_index = tail[1..].join(" ");
-					if string_index.is_empty() {
-						return Response::Error(String::from("please specify an item"));
-					}
-					self.find_and_update(&string_index, |item| {
-						item.priority = priority;
-					})
-				}
-
-				"remove" | "r" | "-" => {
-					let string_index = tail.join(" ");
-					match string_index.parse::<usize>() {
-						Ok(num) => {
-							if num == 0 || num > self.item_vec.len() {
-								return Response::Error(format!(
-									"unable to find item {num}"
-								));
-							}
-							self.item_vec.remove(num - 1);
-						}
-						_ => {
-							self.item_vec
-								.retain(|item| item.description != string_index);
-						}
-					}
-					Response::List
-				}
-
-				arg => Response::Error(format!("unknown argument: {arg}")),
-			},
-			_ => Response::Error(String::from("no argument made")),
+	pub fn toggle_done(&mut self, index: usize) {
+		if let Some(item) = self.item_vec.get_mut(index) {
+			item.state = if item.state == Status::Checked {
+				Status::Open
+			} else {
+				Status::Checked
+			};
 		}
 	}
 
-	fn find_and_update(
-		&mut self,
-		index_or_name: &str,
-		update: impl FnOnce(&mut Item),
-	) -> Response {
-		match index_or_name.parse::<usize>() {
-			Ok(num) => match self.item_vec.get_mut(num - 1) {
-				Some(item) => {
-					update(item);
-					Response::List
-				}
-				_ => Response::Error(format!("unable to find item {num}")),
-			},
-			_ => match self
-				.item_vec
-				.iter_mut()
-				.find(|item| item.description == index_or_name)
-			{
-				Some(item) => {
-					update(item);
-					Response::List
-				}
-				None => {
-					Response::Error(format!("unable to find item {index_or_name}"))
-				}
-			},
+	pub fn set_status(&mut self, index: usize, status: Status) {
+		if let Some(item) = self.item_vec.get_mut(index) {
+			item.state = status;
 		}
+	}
+
+	pub fn adjust_priority(&mut self, index: usize, delta: i8) {
+		if let Some(item) = self.item_vec.get_mut(index) {
+			item.priority = (item.priority + delta).max(0);
+		}
+	}
+
+	pub fn set_due_date(&mut self, index: usize, date: Option<NaiveDate>) {
+		if let Some(item) = self.item_vec.get_mut(index) {
+			item.due_date = date;
+		}
+	}
+
+	pub fn remove(&mut self, index: usize) {
+		if index < self.item_vec.len() {
+			self.item_vec.remove(index);
+		}
+	}
+
+	pub fn sort(&mut self) {
+		self.item_vec.sort();
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn sample() -> Todo {
+		let mut t = Todo::new("test.xit".into());
+		t.add("buy milk".into());
+		t
+	}
+
+	#[test]
+	fn add_creates_open_zero_priority() {
+		let t = sample();
+		assert_eq!(t.item_vec.len(), 1);
+		assert_eq!(t.item_vec[0].state, Status::Open);
+		assert_eq!(t.item_vec[0].priority, 0);
+		assert_eq!(t.item_vec[0].description, "buy milk");
+	}
+
+	#[test]
+	fn toggle_done_flips() {
+		let mut t = sample();
+		t.toggle_done(0);
+		assert_eq!(t.item_vec[0].state, Status::Checked);
+		t.toggle_done(0);
+		assert_eq!(t.item_vec[0].state, Status::Open);
+	}
+
+	#[test]
+	fn set_status_and_edit() {
+		let mut t = sample();
+		t.set_status(0, Status::Ongoing);
+		assert_eq!(t.item_vec[0].state, Status::Ongoing);
+		t.edit(0, "buy oat milk".into());
+		assert_eq!(t.item_vec[0].description, "buy oat milk");
+	}
+
+	#[test]
+	fn priority_clamps_at_zero() {
+		let mut t = sample();
+		t.adjust_priority(0, 2);
+		assert_eq!(t.item_vec[0].priority, 2);
+		t.adjust_priority(0, -5);
+		assert_eq!(t.item_vec[0].priority, 0);
+	}
+
+	#[test]
+	fn due_date_set_and_clear() {
+		let mut t = sample();
+		let d = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+		t.set_due_date(0, Some(d));
+		assert_eq!(t.item_vec[0].due_date, Some(d));
+		t.set_due_date(0, None);
+		assert_eq!(t.item_vec[0].due_date, None);
+	}
+
+	#[test]
+	fn remove_shifts() {
+		let mut t = sample();
+		t.add("walk dog".into());
+		t.remove(0);
+		assert_eq!(t.item_vec.len(), 1);
+		assert_eq!(t.item_vec[0].description, "walk dog");
+		t.remove(99); // out of bounds is a no-op
+		assert_eq!(t.item_vec.len(), 1);
+	}
+
+	#[test]
+	fn sort_orders_by_status_then_priority() {
+		let mut t = Todo::new("test.xit".into());
+		t.add("a done".into());
+		t.toggle_done(0);
+		t.add("b ongoing".into());
+		t.set_status(1, Status::Ongoing);
+		t.sort();
+		// Ongoing ranks before Checked
+		assert_eq!(t.item_vec[0].state, Status::Ongoing);
+		assert_eq!(t.item_vec[1].state, Status::Checked);
+	}
+
+	#[test]
+	fn xit_round_trip_is_idempotent() {
+		for line in [
+			"[ ]  buy milk",
+			"[@]  !! ship release -> 2026-07-01",
+			"[x]  fix a -> b mapping", // "->" in the description, no real date
+		] {
+			let item = Item::parse_line(line);
+			assert_eq!(item.get_file_string(), line, "round trip changed {line:?}");
+		}
+	}
+
+	#[test]
+	fn clean_description_survives_save_load() {
+		let mut t = Todo::new("test.xit".into());
+		t.add("buy milk".into());
+		t.adjust_priority(0, 2);
+		t.set_due_date(0, NaiveDate::from_ymd_opt(2026, 7, 1));
+		let parsed = Item::parse_line(&t.item_vec[0].get_file_string());
+		assert_eq!(parsed.description, "buy milk"); // no leading spaces / markers
+		assert_eq!(parsed.priority, 2);
+		assert_eq!(parsed.due_date, NaiveDate::from_ymd_opt(2026, 7, 1));
 	}
 }

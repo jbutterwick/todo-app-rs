@@ -1,7 +1,5 @@
 use chrono::NaiveDate;
-use crossterm::style::Stylize;
 use std::cmp::Ordering;
-use std::fmt::Display;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Status {
@@ -42,10 +40,6 @@ pub struct Item {
 	pub priority: i8,
 }
 
-pub struct Line {
-	string: String,
-}
-
 impl Item {
 	pub const fn new(
 		description: String,
@@ -62,147 +56,63 @@ impl Item {
 	}
 
 	pub fn parse_dates(date_string: &str) -> Option<NaiveDate> {
-		for format in [
-			"%Y-%m-%d", "%Y/%m/%d", "%Y-%m", "%Y/%m", "%Y", "%Y-W%U", "%Y/W%U", "%Y-Q%q", "%Y/Q%q",
-		] {
-			let string_to_parse = match format {
-				"%Y-%m-%d" | "%Y/%m/%d" => date_string.split_at(9).0,
-				"%Y-W%U" | "%Y/W%U" => date_string.split_at(7).0,
-				"%Y-%m" | "%Y/%m" | "%Y-Q%q" | "%Y/Q%q" => date_string.split_at(6).0,
-				"%Y" => date_string.split_at(3).0,
-				_ => unreachable!(),
-			};
-
-			if let Ok(date) = NaiveDate::parse_from_str(string_to_parse, format) {
-				return Some(date);
-			}
-		}
-		None
+		// Only full y-m-d dates parse to a NaiveDate; take the leading 10 chars so
+		// trailing content on a file line is ignored. `get` is panic-safe on short input.
+		let head = date_string.get(..10).unwrap_or(date_string);
+		NaiveDate::parse_from_str(head, "%Y-%m-%d")
+			.or_else(|_| NaiveDate::parse_from_str(head, "%Y/%m/%d"))
+			.ok()
 	}
 
 	pub fn parse_line(string: &str) -> Self {
-		let (status, description) = string.split_at(3);
-
-		let due_date = description.find("->").and_then(|index| {
-			let (_, tail) = description.split_at(index + 2);
-			let (maybe_date, _) = tail.split_at(12);
-			Self::parse_dates(maybe_date)
-		});
-
-		let maybe_priority = description.trim().split_once(' ');
-
-		let priority: i8 = if maybe_priority.is_some() {
-			maybe_priority.unwrap().0.chars().fold(0, |mut acc: i8, c| {
-				if c == '!' {
-					acc += 1;
-				}
-				acc
-			})
-		} else {
-			0
+		let (status, rest) = string.split_at(3);
+		let state = match Status::from_str(status) {
+			Some(state) => state,
+			None => panic!("Invalid formatting at line: {status} {rest}\nItems should start with one of the following valid states: [ ], [@], [x], [~], [?]"),
 		};
 
-		match Status::from_str(status) {
-			Some(Status::Open) => Self::new(description.parse().unwrap(), Status::Open, due_date, priority),
-			Some(Status::Ongoing) => Self::new(description.parse().unwrap(), Status::Ongoing, due_date, priority),
-			Some(Status::Checked) => Self::new(description.parse().unwrap(), Status::Checked, due_date, priority),
-			Some(Status::Obsolete) => Self::new(description.parse().unwrap(), Status::Obsolete, due_date, priority),
-			Some(Status::InQuestion) => Self::new(description.parse().unwrap(), Status::InQuestion, due_date, priority),
-			None => panic!("Invalid formatting at line: {status} {description}\nItems should start with one of the following valid states: [ ], [@], [x], [~], [?]")
-		}
+		// A trailing "-> <date>" is the due date — but only when it actually parses,
+		// so a description that itself contains "->" is left intact.
+		let (body, due_date) = match rest.rsplit_once("->") {
+			Some((before, after)) => match Self::parse_dates(after.trim()) {
+				Some(date) => (before, Some(date)),
+				None => (rest, None),
+			},
+			None => (rest, None),
+		};
+
+		// A leading run of '!' is the priority marker; the remainder is the description.
+		let body = body.trim();
+		let (priority, description) = match body.split_once(char::is_whitespace) {
+			Some((head, tail)) if !head.is_empty() && head.bytes().all(|b| b == b'!') => {
+				(head.len() as i8, tail.trim_start().to_string())
+			}
+			_ => (0, body.to_string()),
+		};
+
+		Self::new(description, state, due_date, priority)
+	}
+
+	pub(crate) fn suffix(&self) -> (String, String) {
+		let priority = if self.priority > 0 {
+			format!(" {} ", "!".repeat(self.priority as usize))
+		} else {
+			String::from(" ")
+		};
+
+		let date_string = if let Some(date) = self.due_date {
+			format!(" -> {}", date.format("%Y-%m-%d"))
+		} else {
+			String::new()
+		};
+
+		(priority, date_string)
 	}
 
 	pub fn get_file_string(&self) -> String {
 		let prefix = Status::as_str(&self.state);
-
-		let priority = if self.priority > 0 {
-			stringify!(" {} ", &*"!".repeat(self.priority as usize))
-		} else {
-			" "
-		};
-
-		let date_string = if self.due_date.is_some() {
-			stringify!(" -> {}", self.due_date.unwrap().format("%Y-%m-%d"))
-		} else {
-			""
-		};
-
+		let (priority, date_string) = self.suffix();
 		format!("{}{}{}{}", prefix, priority, &self.description, date_string)
-	}
-}
-
-impl Display for Item {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let prefix = Status::as_str(&self.state);
-
-		let priority = if self.priority > 0 {
-			stringify!(" {} ", &*"!".repeat(self.priority as usize))
-		} else {
-			" "
-		};
-
-		let date_string = if self.due_date.is_some() {
-			stringify!(" -> {}", self.due_date.unwrap().format("%Y-%m-%d"))
-		} else {
-			""
-		};
-
-		match self.state {
-			Status::Open => write!(
-				f,
-				"{}{}{}{}",
-				prefix.blue(),
-				priority,
-				&self.description,
-				date_string
-			),
-			Status::InQuestion => {
-				write!(
-					f,
-					"{}{}{}{}",
-					prefix.yellow(),
-					priority,
-					&self.description,
-					date_string
-				)
-			}
-			Status::Checked => {
-				write!(
-					f,
-					"{}{}{}{}",
-					prefix.green(),
-					priority,
-					&self.description.clone().grey(),
-					date_string
-				)
-			}
-			Status::Ongoing => {
-				write!(
-					f,
-					"{}{}{}{}",
-					prefix.magenta(),
-					priority,
-					&self.description,
-					date_string
-				)
-			}
-			Status::Obsolete => {
-				write!(
-					f,
-					"{}{}{}{}",
-					prefix.grey(),
-					priority,
-					&self.description.clone().grey(),
-					date_string
-				)
-			}
-		}
-	}
-}
-
-impl From<Line> for String {
-	fn from(line: Line) -> Self {
-		line.string
 	}
 }
 

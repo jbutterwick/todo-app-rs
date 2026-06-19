@@ -1,24 +1,37 @@
+mod app;
 mod item;
-mod response;
 mod todo;
+mod tui;
+mod ui;
 
-use crate::todo::Todo;
-use std::env;
+use app::App;
+use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use todo::Todo;
 
-fn main() {
-	let file_path = env::args().nth(1).unwrap_or_else(|| String::from("todo.xit"));
+fn main() -> std::io::Result<()> {
+	let file_path = std::env::args()
+		.nth(1)
+		.unwrap_or_else(|| String::from("todo.xit"));
 
-	if let Ok(existing_list) = std::fs::read_to_string(&file_path) {
-		let mut todo = Todo::from_existing(&existing_list, file_path);
-		let mut string = String::new();
-		for item in &todo.item_vec {
-			string.push_str(item.to_string().as_str());
-			string.push('\n');
-		}
-		println!("{string}");
-		Todo::todo_loop(&mut todo);
-	} else {
-		let mut todo = Todo::new(file_path);
-		Todo::todo_loop(&mut todo);
+	let todo = match std::fs::read_to_string(&file_path) {
+		Ok(existing) => Todo::from_existing(&existing, file_path),
+		Err(_) => Todo::new(file_path),
 	};
+
+	let mut terminal = tui::init()?;
+	let result = run(App::new(todo), &mut terminal);
+	tui::restore()?; // always restore the terminal, even if the loop errored
+	result
+}
+
+fn run(mut app: App, terminal: &mut tui::Tui) -> std::io::Result<()> {
+	while !app.should_quit {
+		terminal.draw(|frame| ui::ui(frame, &mut app))?;
+		if let Event::Key(key) = event::read()? {
+			if key.kind == KeyEventKind::Press {
+				app.handle_key(key);
+			}
+		}
+	}
+	Ok(())
 }
