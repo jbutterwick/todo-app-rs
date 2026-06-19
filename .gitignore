@@ -12,3 +12,6 @@ Cargo.lock
 .idea/
 
 TODO.md
+
+# Recurrence sidecar (runtime state, regenerated per .xit file)
+*.recur.toml

@@ -1,7 +1,10 @@
 use crate::item::{Item, Status};
+use crate::recur::rule::{Freq, NWeekday, Recurrence};
+use crate::recur::series::{Override, RecurringSeries, Snapshot};
+use crate::recur::store::SeriesStore;
 use crate::theme::{load_themes, Theme};
 use crate::todo::Todo;
-use chrono::{Days, Local, Months, NaiveDate};
+use chrono::{Datelike, Days, Local, Months, NaiveDate, Weekday};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 
@@ -13,11 +16,12 @@ pub const HELP_TEXT: &str = "\
  @              ongoing       r / -   remove
  ~              obsolete      s       sort
  i              question      f       cycle filter
- c              calendar      t       theme
- h / F1         this help     q / Esc quit (saves)";
+ c / Esc        calendar      t       theme
+ R              repeat todo   q       quit (saves)
+ h / F1         this help";
 
 pub const CALENDAR_HINT: &str =
-	"←→ day · ↑↓ week · [ ] month · j/k item · a/e/x/o/@/~/i/>/</D/r edit · c/Esc back";
+	"←→/↑↓ move · [ ] month · j/k item · a add · R repeat · e/x/o/@/~/i/>/</D/r edit · c/Esc list";
 
 #[derive(Clone, Copy)]
 pub enum Mode {
@@ -29,6 +33,97 @@ pub enum Mode {
 	ConfirmRemove,
 	Calendar,
 	Theme,
+	Recurrence,  // create/edit a recurring rule (builder + raw field)
+	RecurRemove, // submenu: skip / this-and-future / whole series
+}
+
+/// State for the recurrence builder popup. `edit` is set when editing an
+/// existing series this-and-future at a given occurrence date.
+pub struct RecurBuilder {
+	pub title: String,
+	pub priority: i8,
+	pub freq: Freq,
+	pub interval: u32,
+	pub weekday: Weekday,
+	pub until: String,
+	pub raw: String,
+	pub field: usize, // 0=title 1=freq 2=interval 3=weekday 4=until 5=raw
+	pub anchor: NaiveDate,
+	pub edit: Option<(u64, NaiveDate)>, // editing an existing series this-and-future
+	pub from_item: Option<usize>,       // converting a one-off item (removed on commit)
+	pub error: String,
+}
+
+pub const RECUR_FIELDS: usize = 6;
+
+impl RecurBuilder {
+	fn create(anchor: NaiveDate) -> Self {
+		Self {
+			title: String::new(),
+			priority: 0,
+			freq: Freq::Weekly,
+			interval: 1,
+			weekday: anchor.weekday(),
+			until: String::new(),
+			raw: String::new(),
+			field: 0,
+			anchor,
+			edit: None,
+			from_item: None,
+			error: String::new(),
+		}
+	}
+
+	fn edit_series(s: &RecurringSeries, date: NaiveDate) -> Self {
+		Self {
+			title: s.title.clone(),
+			priority: s.priority,
+			freq: s.rule.freq,
+			interval: s.rule.interval,
+			weekday: s.rule.by_day.first().map_or(s.anchor.weekday(), |n| n.weekday),
+			until: s.rule.until.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default(),
+			raw: s.rule.to_rrule(),
+			field: 0,
+			anchor: s.anchor,
+			edit: Some((s.id, date)),
+			from_item: None,
+			error: String::new(),
+		}
+	}
+
+	/// Assemble a Recurrence from the builder. The raw field wins when non-empty.
+	pub fn to_rule(&self) -> Result<Recurrence, String> {
+		if !self.raw.trim().is_empty() {
+			return Recurrence::from_rrule(self.raw.trim()).map_err(|e| format!("{e:?}"));
+		}
+		let mut rule = Recurrence {
+			freq: self.freq,
+			interval: self.interval.max(1),
+			..Recurrence::default()
+		};
+		if matches!(self.freq, Freq::Weekly) {
+			rule.by_day = vec![NWeekday {
+				ord: None,
+				weekday: self.weekday,
+			}];
+		}
+		let u = self.until.trim();
+		if !u.is_empty() {
+			match crate::item::Item::parse_dates(u) {
+				Some(d) => rule.until = Some(d),
+				None => return Err(format!("bad until date: {u}")),
+			}
+		}
+		Ok(rule)
+	}
+}
+
+/// One row shown on a calendar day: a concrete dated item, or a computed
+/// occurrence of a recurring series.
+#[derive(Clone, Copy)]
+pub enum DayEntry {
+	Item(usize),
+	Recurring { series_id: u64, date: NaiveDate },
 }
 
 pub struct App {
@@ -45,8 +140,11 @@ pub struct App {
 	pub theme_idx: usize,     // currently applied theme
 	pub pick_cursor: NaiveDate, // date-picker calendar cursor
 	pub pick_text_focus: bool, // date picker: text field focused (vs calendar)
+	pub store: SeriesStore,   // recurring series (sidecar todo.recur.toml)
+	pub builder: Option<RecurBuilder>, // active recurrence builder
 	popup_return: Mode,       // mode to restore when a popup closes
 	target: Option<usize>,    // real item index an Edit/DatePicker popup acts on
+	rec_target: Option<(u64, NaiveDate)>, // series + date a recurring Edit/Remove acts on
 	add_due: Option<NaiveDate>, // due date stamped onto a newly added item
 	theme_saved: usize,       // theme to revert to if the picker is cancelled
 }
@@ -57,13 +155,15 @@ impl App {
 		if !todo.item_vec.is_empty() {
 			list_state.select(Some(0));
 		}
+		let store = SeriesStore::load(&todo.file_path);
 		Self {
 			todo,
-			mode: Mode::Normal,
+			store,
+			mode: Mode::Calendar, // calendar is the home view
 			list_state,
 			input: String::new(),
 			filter: None,
-			status_msg: String::from("`h` for help"),
+			status_msg: String::from(CALENDAR_HINT),
 			should_quit: false,
 			cursor: Local::now().date_naive(),
 			due_selected: 0,
@@ -71,8 +171,10 @@ impl App {
 			theme_idx: 0,
 			pick_cursor: Local::now().date_naive(),
 			pick_text_focus: true,
+			builder: None,
 			popup_return: Mode::Normal,
 			target: None,
+			rec_target: None,
 			add_due: None,
 			theme_saved: 0,
 		}
@@ -102,6 +204,8 @@ impl App {
 				| Mode::Help
 				| Mode::ConfirmRemove
 				| Mode::Theme
+				| Mode::Recurrence
+				| Mode::RecurRemove
 		)
 	}
 
@@ -115,13 +219,34 @@ impl App {
 			.collect()
 	}
 
+	/// All rows shown on `date`: concrete dated items, then recurring occurrences.
+	pub fn entries_on(&self, date: NaiveDate) -> Vec<DayEntry> {
+		let mut out: Vec<DayEntry> = self
+			.items_due_on(date)
+			.into_iter()
+			.map(DayEntry::Item)
+			.collect();
+		for s in &self.store.series {
+			if s.occurs_on(date) {
+				out.push(DayEntry::Recurring {
+					series_id: s.id,
+					date,
+				});
+			}
+		}
+		out
+	}
+
 	// ---- filter <-> real index mapping (item_vec stays canonical) ----
 
+	/// Indices shown in the list view: only undated todos (dated ones live in the
+	/// calendar), narrowed by the optional status filter.
 	pub fn visible_indices(&self) -> Vec<usize> {
 		self.todo
 			.item_vec
 			.iter()
 			.enumerate()
+			.filter(|(_, it)| it.due_date.is_none())
 			.filter(|(_, it)| self.filter.as_ref().is_none_or(|f| &it.state == f))
 			.map(|(i, _)| i)
 			.collect()
@@ -144,6 +269,9 @@ impl App {
 
 	fn save(&mut self) {
 		if let Err(e) = self.todo.save_to_file() {
+			self.status_msg = e;
+		}
+		if let Err(e) = self.store.save() {
 			self.status_msg = e;
 		}
 	}
@@ -183,12 +311,14 @@ impl App {
 			Mode::ConfirmRemove => self.handle_confirm(key),
 			Mode::Calendar => self.handle_calendar(key),
 			Mode::Theme => self.handle_theme(key),
+			Mode::Recurrence => self.handle_recurrence(key),
+			Mode::RecurRemove => self.handle_recur_remove(key),
 		}
 	}
 
 	fn handle_normal(&mut self, key: KeyEvent) {
 		match key.code {
-			KeyCode::Char('q') | KeyCode::Esc => self.quit(),
+			KeyCode::Char('q') => self.quit(),
 			KeyCode::Char('j') | KeyCode::Down => self.move_by(1),
 			KeyCode::Char('k') | KeyCode::Up => self.move_by(-1),
 			KeyCode::Char('g') | KeyCode::Home => self.jump(false),
@@ -206,7 +336,7 @@ impl App {
 				self.save();
 			}
 			KeyCode::Char('f') => self.cycle_filter(),
-			KeyCode::Char('c') => {
+			KeyCode::Char('c') | KeyCode::Esc => {
 				self.mode = Mode::Calendar;
 				self.due_selected = 0;
 				self.status_msg = String::from(CALENDAR_HINT);
@@ -240,6 +370,8 @@ impl App {
 	fn handle_text_input(&mut self, key: KeyEvent) {
 		match key.code {
 			KeyCode::Esc => self.close_popup(),
+			// in Add, Tab turns the in-progress todo into a repeating one
+			KeyCode::Tab if matches!(self.mode, Mode::Add) => self.add_to_builder(),
 			KeyCode::Backspace => {
 				self.input.pop();
 			}
@@ -247,6 +379,18 @@ impl App {
 			KeyCode::Enter => self.commit_input(),
 			_ => {}
 		}
+	}
+
+	/// Hand the Add popup's text off to the recurrence builder as the title.
+	fn add_to_builder(&mut self) {
+		let anchor = self.add_due.unwrap_or_else(|| Local::now().date_naive());
+		let mut b = RecurBuilder::create(anchor);
+		b.title = self.input.trim().to_string();
+		b.field = 1; // title is filled; focus the frequency
+		self.builder = Some(b);
+		self.input.clear();
+		self.add_due = None;
+		self.mode = Mode::Recurrence; // popup_return preserved from open_add
 	}
 
 	fn handle_confirm(&mut self, key: KeyEvent) {
@@ -267,7 +411,8 @@ impl App {
 			KeyCode::Char('q') => self.quit(),
 			KeyCode::Esc | KeyCode::Char('c') => {
 				self.mode = Mode::Normal;
-				self.status_msg = String::from("`h` for help");
+				self.clamp_selection();
+				self.status_msg = String::from("undated todos · c/Esc calendar · h help");
 			}
 			// arrow keys move the calendar day cursor
 			KeyCode::Left => self.shift_days(-1),
@@ -281,27 +426,20 @@ impl App {
 			KeyCode::Char('k') => self.move_due(-1),
 			// add a todo due on the cursor date
 			KeyCode::Char('a') | KeyCode::Char('+') => self.open_add(Some(self.cursor)),
-			// everything below acts on the selected due item — same as the list view
-			KeyCode::Char('e') => {
-				if let Some(i) = self.due_real() {
-					self.open_edit(i);
-				}
-			}
+			// everything below acts on the selected entry — same keys as the list view
+			KeyCode::Char('e') => self.edit_due(),
+			KeyCode::Char('R') => self.open_builder(),
 			KeyCode::Char('D') => {
-				if let Some(i) = self.due_real() {
+				if let Some(i) = self.due_item() {
 					self.open_due_date(i);
 				}
 			}
-			KeyCode::Char('r') | KeyCode::Char('-') => {
-				if let Some(i) = self.due_real() {
-					self.open_confirm_remove(i);
-				}
-			}
-			KeyCode::Char('x') | KeyCode::Char(' ') => self.mutate_due(|t, i| t.toggle_done(i)),
-			KeyCode::Char('o') => self.mutate_due(|t, i| t.set_status(i, Status::Open)),
-			KeyCode::Char('@') => self.mutate_due(|t, i| t.set_status(i, Status::Ongoing)),
-			KeyCode::Char('~') => self.mutate_due(|t, i| t.set_status(i, Status::Obsolete)),
-			KeyCode::Char('i') => self.mutate_due(|t, i| t.set_status(i, Status::InQuestion)),
+			KeyCode::Char('r') | KeyCode::Char('-') => self.remove_due(),
+			KeyCode::Char('x') | KeyCode::Char(' ') => self.toggle_due_done(),
+			KeyCode::Char('o') => self.set_due_status(Status::Open),
+			KeyCode::Char('@') => self.set_due_status(Status::Ongoing),
+			KeyCode::Char('~') => self.set_due_status(Status::Obsolete),
+			KeyCode::Char('i') => self.set_due_status(Status::InQuestion),
 			KeyCode::Char('>') => self.mutate_due(|t, i| t.adjust_priority(i, 1)),
 			KeyCode::Char('<') => self.mutate_due(|t, i| t.adjust_priority(i, -1)),
 			KeyCode::Char('s') => {
@@ -314,17 +452,258 @@ impl App {
 		}
 	}
 
-	fn due_real(&self) -> Option<usize> {
-		self.items_due_on(self.cursor).get(self.due_selected).copied()
+	fn due_entry(&self) -> Option<DayEntry> {
+		self.entries_on(self.cursor).get(self.due_selected).copied()
+	}
+
+	/// The selected entry's item index, if it is a concrete item (not recurring).
+	fn due_item(&self) -> Option<usize> {
+		match self.due_entry() {
+			Some(DayEntry::Item(i)) => Some(i),
+			_ => None,
+		}
 	}
 
 	/// Mutate the selected due item, then clamp the due selection + save.
+	/// (Concrete items only — recurring entries are handled by the methods below.)
 	fn mutate_due(&mut self, f: impl FnOnce(&mut Todo, usize)) {
-		if let Some(i) = self.due_real() {
+		if let Some(i) = self.due_item() {
 			f(&mut self.todo, i);
 			self.clamp_due();
 			self.save();
 		}
+	}
+
+	/// Toggle done on the selected entry (item: Checked<->Open; recurring: a
+	/// frozen Done override on that date <-> cleared).
+	fn toggle_due_done(&mut self) {
+		match self.due_entry() {
+			Some(DayEntry::Item(i)) => self.todo.toggle_done(i),
+			Some(DayEntry::Recurring { series_id, date }) => {
+				if let Some(s) = self.store.get_mut(series_id) {
+					if matches!(s.overrides.get(&date), Some(Override::Done(_))) {
+						s.clear_override(date);
+					} else {
+						let snap = Snapshot {
+							title: s.title.clone(),
+							priority: s.priority,
+							state: Status::Checked,
+						};
+						s.set_override(date, Override::Done(snap));
+					}
+				}
+			}
+			None => return,
+		}
+		self.clamp_due();
+		self.save();
+	}
+
+	/// Set a status on the selected entry. For a recurring occurrence this is a
+	/// dated override: Open clears it, Checked/Obsolete freeze a snapshot, others
+	/// are a plain state override (still follow the series title).
+	fn set_due_status(&mut self, status: Status) {
+		match self.due_entry() {
+			Some(DayEntry::Item(i)) => self.todo.set_status(i, status),
+			Some(DayEntry::Recurring { series_id, date }) => {
+				if let Some(s) = self.store.get_mut(series_id) {
+					match status {
+						Status::Open => s.clear_override(date),
+						Status::Checked | Status::Obsolete => {
+							let snap = Snapshot {
+								title: s.title.clone(),
+								priority: s.priority,
+								state: status,
+							};
+							s.set_override(date, Override::Done(snap));
+						}
+						other => s.set_override(date, Override::State(other)),
+					}
+				}
+			}
+			None => return,
+		}
+		self.clamp_due();
+		self.save();
+	}
+
+	/// Remove the selected entry: a concrete item opens the y/n confirm; a
+	/// recurring occurrence opens the skip / this-and-future / series submenu.
+	fn remove_due(&mut self) {
+		match self.due_entry() {
+			Some(DayEntry::Item(i)) => self.open_confirm_remove(i),
+			Some(DayEntry::Recurring { series_id, date }) => {
+				self.rec_target = Some((series_id, date));
+				self.popup_return = self.mode;
+				self.mode = Mode::RecurRemove;
+			}
+			None => {}
+		}
+	}
+
+	/// Edit the selected entry's title. A recurring occurrence edits the series
+	/// this-and-future (committing the title splits the series at this date).
+	fn edit_due(&mut self) {
+		match self.due_entry() {
+			Some(DayEntry::Item(i)) => self.open_edit(i),
+			Some(DayEntry::Recurring { series_id, date }) => {
+				if let Some(s) = self.store.get(series_id) {
+					self.input = s.title.clone();
+					self.rec_target = Some((series_id, date));
+					self.popup_return = self.mode;
+					self.mode = Mode::Edit;
+				}
+			}
+			None => {}
+		}
+	}
+
+	fn open_builder(&mut self) {
+		let builder = match self.due_entry() {
+			Some(DayEntry::Recurring { series_id, date }) => self
+				.store
+				.get(series_id)
+				.map(|s| RecurBuilder::edit_series(s, date))
+				.unwrap_or_else(|| RecurBuilder::create(self.cursor)),
+			// a selected one-off item: pre-fill from it and convert it on commit
+			Some(DayEntry::Item(i)) => {
+				let item = &self.todo.item_vec[i];
+				let mut b = RecurBuilder::create(item.due_date.unwrap_or(self.cursor));
+				b.title = item.description.clone();
+				b.priority = item.priority;
+				b.from_item = Some(i);
+				b
+			}
+			None => RecurBuilder::create(self.cursor),
+		};
+		self.builder = Some(builder);
+		self.popup_return = self.mode;
+		self.mode = Mode::Recurrence;
+	}
+
+	fn handle_recur_remove(&mut self, key: KeyEvent) {
+		let Some((sid, date)) = self.rec_target else {
+			self.mode = self.popup_return;
+			return;
+		};
+		let acted = match key.code {
+			KeyCode::Char('s') => {
+				if let Some(s) = self.store.get_mut(sid) {
+					s.skip(date);
+				}
+				true
+			}
+			KeyCode::Char('f') => {
+				if let Some(s) = self.store.get_mut(sid) {
+					s.truncate_before(date);
+				}
+				true
+			}
+			KeyCode::Char('d') => {
+				self.store.remove(sid);
+				true
+			}
+			_ => false,
+		};
+		if acted {
+			self.clamp_due();
+			self.save();
+		}
+		self.rec_target = None;
+		self.mode = self.popup_return;
+	}
+
+	fn handle_recurrence(&mut self, key: KeyEvent) {
+		let Some(b) = self.builder.as_mut() else {
+			self.mode = self.popup_return;
+			return;
+		};
+		match key.code {
+			KeyCode::Esc => {
+				self.builder = None;
+				self.mode = self.popup_return;
+			}
+			// Tab / Shift-Tab and Down / Up all move between fields
+			KeyCode::Tab | KeyCode::Down => b.field = (b.field + 1) % RECUR_FIELDS,
+			KeyCode::BackTab | KeyCode::Up => b.field = (b.field + RECUR_FIELDS - 1) % RECUR_FIELDS,
+			KeyCode::Enter => self.commit_builder(),
+			// Left / Right change the focused field's value
+			KeyCode::Left | KeyCode::Right => {
+				let fwd = key.code == KeyCode::Right;
+				match b.field {
+					1 => b.freq = cycle_freq(b.freq, fwd),
+					2 => b.interval = if fwd { b.interval + 1 } else { b.interval.saturating_sub(1).max(1) },
+					3 => b.weekday = if fwd { b.weekday.succ() } else { b.weekday.pred() },
+					_ => {}
+				}
+			}
+			KeyCode::Backspace => match b.field {
+				0 => {
+					b.title.pop();
+				}
+				4 => {
+					b.until.pop();
+				}
+				5 => {
+					b.raw.pop();
+				}
+				_ => {}
+			},
+			KeyCode::Char(c) => match b.field {
+				0 => b.title.push(c),
+				2 if c.is_ascii_digit() => {
+					b.interval = format!("{}{c}", b.interval).parse().unwrap_or(b.interval).max(1)
+				}
+				4 => b.until.push(c),
+				5 => b.raw.push(c),
+				_ => {}
+			},
+			_ => {}
+		}
+	}
+
+	fn commit_builder(&mut self) {
+		let Some(b) = self.builder.as_ref() else { return };
+		let rule = match b.to_rule() {
+			Ok(r) => r,
+			Err(e) => {
+				if let Some(b) = self.builder.as_mut() {
+					b.error = e;
+				}
+				return;
+			}
+		};
+		let title = b.title.trim().to_string();
+		let title = if title.is_empty() {
+			String::from("recurring todo")
+		} else {
+			title
+		};
+		let edit = b.edit;
+		let from_item = b.from_item;
+		let priority = b.priority;
+		let anchor = b.anchor;
+		match edit {
+			Some((sid, date)) => {
+				if let Some(new_id) = self.store.split(sid, date) {
+					if let Some(s) = self.store.get_mut(new_id) {
+						s.title = title;
+						s.rule = rule;
+					}
+				}
+			}
+			None => {
+				self.store.add(title, priority, rule, anchor);
+				if let Some(i) = from_item {
+					self.todo.remove(i); // converted: drop the one-off item
+					self.clamp_selection();
+				}
+			}
+		}
+		self.builder = None;
+		self.clamp_due();
+		self.save();
+		self.mode = self.popup_return;
 	}
 
 	fn handle_theme(&mut self, key: KeyEvent) {
@@ -409,7 +788,7 @@ impl App {
 	}
 
 	fn move_due(&mut self, delta: isize) {
-		let len = self.items_due_on(self.cursor).len();
+		let len = self.entries_on(self.cursor).len();
 		if len == 0 {
 			return;
 		}
@@ -418,7 +797,7 @@ impl App {
 	}
 
 	fn clamp_due(&mut self) {
-		let len = self.items_due_on(self.cursor).len();
+		let len = self.entries_on(self.cursor).len();
 		self.due_selected = self.due_selected.min(len.saturating_sub(1));
 	}
 
@@ -472,6 +851,7 @@ impl App {
 		self.input.clear();
 		self.add_due = None;
 		self.target = None;
+		self.rec_target = None;
 		self.mode = self.popup_return;
 		self.clamp_due();
 	}
@@ -487,12 +867,23 @@ impl App {
 				self.clamp_selection();
 				self.save();
 			}
-			Mode::Edit => {
-				if let (Some(i), false) = (self.target, text.is_empty()) {
-					self.todo.edit(i, text);
-					self.save();
+			Mode::Edit if !text.is_empty() => match self.rec_target {
+				// recurring: editing the title splits the series this-and-future
+				Some((sid, date)) => {
+					if let Some(new_id) = self.store.split(sid, date) {
+						if let Some(s) = self.store.get_mut(new_id) {
+							s.title = text;
+						}
+						self.save();
+					}
 				}
-			}
+				None => {
+					if let Some(i) = self.target {
+						self.todo.edit(i, text);
+						self.save();
+					}
+				}
+			},
 			_ => {}
 		}
 		self.close_popup();
@@ -526,6 +917,13 @@ fn add_days(date: NaiveDate, n: i64) -> NaiveDate {
 	shifted.unwrap_or(date)
 }
 
+fn cycle_freq(freq: Freq, forward: bool) -> Freq {
+	let order = [Freq::Daily, Freq::Weekly, Freq::Monthly, Freq::Yearly];
+	let i = order.iter().position(|&f| f == freq).unwrap_or(1);
+	let n = order.len();
+	order[if forward { (i + 1) % n } else { (i + n - 1) % n }]
+}
+
 fn add_months(date: NaiveDate, forward: bool) -> NaiveDate {
 	let shifted = if forward {
 		date.checked_add_months(Months::new(1))
@@ -547,9 +945,30 @@ mod tests {
 		app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
 	}
 
+	// Apps start in the list view for these tests; calendar tests press `c` to enter.
 	fn empty_app() -> App {
 		// non-existent path so save() is a no-op-ish; we only assert in-memory state
-		App::new(Todo::new("/tmp/__todo_test_unused.xit".into()))
+		let mut app = App::new(Todo::new("/tmp/__todo_test_unused.xit".into()));
+		app.mode = Mode::Normal;
+		app
+	}
+
+	fn list_app(contents: &str) -> App {
+		let mut app = App::new(Todo::from_existing(contents, "/tmp/__x.xit".into()));
+		app.mode = Mode::Normal;
+		app
+	}
+
+	#[test]
+	fn calendar_is_the_default_view() {
+		let app = App::new(Todo::new("/tmp/__x.xit".into()));
+		assert!(matches!(app.mode, Mode::Calendar));
+	}
+
+	#[test]
+	fn list_shows_only_undated_todos() {
+		let app = list_app("[ ]  dated -> 2026-06-19\n[ ]  undated\n");
+		assert_eq!(app.visible_indices(), vec![1]); // only the undated one
 	}
 
 	#[test]
@@ -576,7 +995,7 @@ mod tests {
 
 	#[test]
 	fn status_keys_and_filter_mapping() {
-		let mut app = App::new(Todo::from_existing("[ ]  a\n[ ]  b\n", "/tmp/__x.xit".into()));
+		let mut app = list_app("[ ]  a\n[ ]  b\n");
 		// select second item, mark ongoing
 		press(&mut app, KeyCode::Char('j'));
 		app.handle_key(key('@'));
@@ -591,7 +1010,7 @@ mod tests {
 
 	#[test]
 	fn due_date_popup_sets_date() {
-		let mut app = App::new(Todo::from_existing("[ ]  a\n", "/tmp/__x.xit".into()));
+		let mut app = list_app("[ ]  a\n");
 		press(&mut app, KeyCode::Char('D'));
 		for c in "2026-07-01".chars() {
 			app.handle_key(key(c));
@@ -742,7 +1161,7 @@ mod tests {
 
 	#[test]
 	fn datepicker_calendar_pick_sets_date() {
-		let mut app = App::new(Todo::from_existing("[ ]  task\n", "/tmp/__x.xit".into()));
+		let mut app = list_app("[ ]  task\n");
 		app.cursor = ymd(2026, 6, 19);
 		// open picker on the selected item
 		press(&mut app, KeyCode::Char('D'));
@@ -760,7 +1179,7 @@ mod tests {
 	#[test]
 	fn datepicker_scroll_then_enter_saves_without_tab() {
 		// reproduces the reported bug: open picker, scroll the grid, Enter -> saves
-		let mut app = App::new(Todo::from_existing("[ ]  task\n", "/tmp/__x.xit".into()));
+		let mut app = list_app("[ ]  task\n");
 		app.cursor = ymd(2026, 6, 19);
 		press(&mut app, KeyCode::Char('D'));
 		assert!(app.pick_text_focus); // starts in text mode
@@ -771,19 +1190,26 @@ mod tests {
 	}
 
 	#[test]
-	fn datepicker_text_still_works_and_clears() {
-		let mut app = App::new(Todo::from_existing("[ ]  task\n", "/tmp/__x.xit".into()));
-		app.todo.set_due_date(0, Some(ymd(2026, 1, 1)));
-		// type a new date (text focus is the default)
+	fn datepicker_text_sets_date_from_list() {
+		let mut app = list_app("[ ]  task\n"); // undated, shown in the list
 		press(&mut app, KeyCode::Char('D'));
 		for c in "2026-07-01".chars() {
-			app.handle_key(key(c));
+			app.handle_key(key(c)); // text focus is the default
 		}
 		press(&mut app, KeyCode::Enter);
 		assert_eq!(app.todo.item_vec[0].due_date, Some(ymd(2026, 7, 1)));
-		// reopen, submit empty -> clears
-		press(&mut app, KeyCode::Char('D'));
-		press(&mut app, KeyCode::Enter);
+	}
+
+	#[test]
+	fn datepicker_clears_date_from_calendar() {
+		// a dated todo lives in the calendar; clear it by submitting an empty picker
+		let mut app = empty_app();
+		app.cursor = ymd(2026, 7, 1);
+		app.todo.add("task".into());
+		app.todo.set_due_date(0, Some(ymd(2026, 7, 1)));
+		press(&mut app, KeyCode::Char('c')); // calendar; item is due on the cursor
+		press(&mut app, KeyCode::Char('D')); // picker on the due item, empty text
+		press(&mut app, KeyCode::Enter); // empty -> clear
 		assert_eq!(app.todo.item_vec[0].due_date, None);
 	}
 
@@ -806,5 +1232,141 @@ mod tests {
 		press(&mut app, KeyCode::Enter);
 		assert_eq!(app.theme_idx, start + 1);
 		assert!(matches!(app.mode, Mode::Normal));
+	}
+
+	fn recurring_app() -> (App, u64) {
+		use crate::recur::rule::Recurrence;
+		let mut app = App::new(Todo::new("/tmp/__rec.xit".into())); // Calendar mode by default
+		let rule = Recurrence::from_rrule("FREQ=WEEKLY;BYDAY=MO").unwrap();
+		let id = app.store.add("Water".into(), 0, rule, ymd(2026, 6, 1));
+		app.cursor = ymd(2026, 6, 8); // a Monday occurrence
+		app.due_selected = 0;
+		(app, id)
+	}
+
+	#[test]
+	fn complete_recurring_occurrence_toggles_done_override() {
+		let (mut app, id) = recurring_app();
+		app.handle_key(key('x')); // complete -> frozen Done override
+		assert!(matches!(
+			app.store.get(id).unwrap().overrides.get(&ymd(2026, 6, 8)),
+			Some(Override::Done(_))
+		));
+		app.handle_key(key('x')); // toggle off -> cleared
+		assert!(app.store.get(id).unwrap().overrides.is_empty());
+	}
+
+	#[test]
+	fn recurring_status_and_skip() {
+		let (mut app, id) = recurring_app();
+		app.handle_key(key('@')); // ongoing -> State override
+		assert!(matches!(
+			app.store.get(id).unwrap().overrides.get(&ymd(2026, 6, 8)),
+			Some(Override::State(Status::Ongoing))
+		));
+		app.handle_key(key('o')); // undo -> cleared
+		assert!(app.store.get(id).unwrap().overrides.is_empty());
+		app.handle_key(key('r')); // remove -> opens the recurring submenu
+		assert!(matches!(app.mode, Mode::RecurRemove));
+		app.handle_key(key('s')); // skip this occurrence
+		assert!(app.store.get(id).unwrap().exdates.contains(&ymd(2026, 6, 8)));
+		assert!(!app.store.get(id).unwrap().occurs_on(ymd(2026, 6, 8)));
+		assert!(matches!(app.mode, Mode::Calendar));
+	}
+
+	#[test]
+	fn builder_creates_series_at_cursor() {
+		let mut app = App::new(Todo::new("/tmp/__rec.xit".into())); // Calendar mode
+		app.cursor = ymd(2026, 6, 1); // a Monday
+		app.handle_key(key('R')); // open builder (create)
+		assert!(matches!(app.mode, Mode::Recurrence));
+		// type a title (field 0 is focused), then commit with defaults (weekly on cursor weekday)
+		for c in "Standup".chars() {
+			app.handle_key(key(c));
+		}
+		app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+		assert!(matches!(app.mode, Mode::Calendar));
+		assert_eq!(app.store.series.len(), 1);
+		let s = &app.store.series[0];
+		assert_eq!(s.title, "Standup");
+		assert!(s.occurs_on(ymd(2026, 6, 1)));
+		assert!(s.occurs_on(ymd(2026, 6, 8))); // weekly
+	}
+
+	#[test]
+	fn editing_recurring_title_splits_this_and_future() {
+		let (mut app, id) = recurring_app(); // weekly Mon, anchor 6/1, cursor 6/8
+		app.handle_key(key('e')); // edit title of the 6/8 occurrence
+		assert!(matches!(app.mode, Mode::Edit));
+		// replace the prefilled title
+		for _ in 0.."Water".len() {
+			app.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+		}
+		for c in "Hydrate".chars() {
+			app.handle_key(key(c));
+		}
+		app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+		// original series capped before 6/8; a new series carries the new title from 6/8
+		let old = app.store.get(id).unwrap();
+		assert_eq!(old.view(ymd(2026, 6, 1)).0, "Water"); // earlier occurrence unchanged
+		assert!(!old.occurs_on(ymd(2026, 6, 8))); // capped
+		let future = app.store.series.iter().find(|s| s.id != id).unwrap();
+		assert_eq!(future.view(ymd(2026, 6, 8)).0, "Hydrate");
+		assert!(future.occurs_on(ymd(2026, 6, 15))); // phase preserved
+	}
+
+	#[test]
+	fn pressing_R_on_a_dated_item_prefills_and_converts_it() {
+		let mut app = App::new(Todo::from_existing("[ ]  ! gym -> 2026-06-19\n", "/tmp/__rec.xit".into()));
+		app.cursor = ymd(2026, 6, 19); // the item's due date
+		app.due_selected = 0; // the dated item is the selected entry
+		app.handle_key(key('R'));
+		assert!(matches!(app.mode, Mode::Recurrence));
+		let b = app.builder.as_ref().unwrap();
+		assert_eq!(b.title, "gym"); // prefilled from the item
+		assert_eq!(b.priority, 1);
+		assert_eq!(b.from_item, Some(0));
+		app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)); // commit (weekly default)
+		assert_eq!(app.store.series.len(), 1);
+		assert_eq!(app.store.series[0].title, "gym");
+		assert_eq!(app.store.series[0].priority, 1);
+		assert!(app.todo.item_vec.is_empty()); // the one-off item was converted away
+	}
+
+	#[test]
+	fn builder_arrows_navigate_fields() {
+		let mut app = App::new(Todo::new("/tmp/__rec.xit".into()));
+		app.handle_key(key('R')); // open builder, field 0
+		assert_eq!(app.builder.as_ref().unwrap().field, 0);
+		press(&mut app, KeyCode::Down);
+		assert_eq!(app.builder.as_ref().unwrap().field, 1);
+		press(&mut app, KeyCode::Down);
+		assert_eq!(app.builder.as_ref().unwrap().field, 2);
+		press(&mut app, KeyCode::Up);
+		assert_eq!(app.builder.as_ref().unwrap().field, 1);
+		// Left/Right still change the focused value (freq), not the field
+		let before = app.builder.as_ref().unwrap().freq;
+		press(&mut app, KeyCode::Right);
+		assert_ne!(format!("{:?}", app.builder.as_ref().unwrap().freq), format!("{before:?}"));
+		assert_eq!(app.builder.as_ref().unwrap().field, 1); // field unchanged
+	}
+
+	#[test]
+	fn add_popup_tab_converts_to_recurring() {
+		let mut app = App::new(Todo::new("/tmp/__rec.xit".into())); // Calendar mode
+		app.cursor = ymd(2026, 6, 1);
+		press(&mut app, KeyCode::Char('a')); // add, due on cursor
+		assert!(matches!(app.mode, Mode::Add));
+		for c in "Standup".chars() {
+			app.handle_key(key(c));
+		}
+		press(&mut app, KeyCode::Tab); // hand off to the recurrence builder
+		assert!(matches!(app.mode, Mode::Recurrence));
+		assert_eq!(app.builder.as_ref().unwrap().title, "Standup");
+		press(&mut app, KeyCode::Enter);
+		assert!(app.todo.item_vec.is_empty()); // nothing added as a one-off
+		assert_eq!(app.store.series.len(), 1);
+		assert_eq!(app.store.series[0].title, "Standup");
+		assert_eq!(app.store.series[0].anchor, ymd(2026, 6, 1));
 	}
 }

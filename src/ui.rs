@@ -1,5 +1,7 @@
-use crate::app::{App, Mode, HELP_TEXT};
+use crate::app::{App, DayEntry, Mode, HELP_TEXT};
 use crate::item::{Item, Status};
+use crate::recur::rule::Freq;
+use crate::recur::series::RecurringSeries;
 use crate::theme::Theme;
 use chrono::NaiveDate;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -34,7 +36,7 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 
 	// text-entry popups also place the terminal cursor after the input
 	let input_area = match app.mode {
-		Mode::Add => Some(popup(frame, "Add item", &app.input, &theme)),
+		Mode::Add => Some(popup(frame, "Add item — Tab: make repeating", &app.input, &theme)),
 		Mode::Edit => Some(popup(frame, "Edit", &app.input, &theme)),
 		Mode::DatePicker => {
 			render_date_picker(frame, app, &theme);
@@ -50,6 +52,19 @@ pub fn ui(frame: &mut Frame, app: &mut App) {
 		}
 		Mode::Theme => {
 			render_theme_menu(frame, app, &theme);
+			None
+		}
+		Mode::Recurrence => {
+			render_recur_builder(frame, app, &theme);
+			None
+		}
+		Mode::RecurRemove => {
+			popup(
+				frame,
+				"Remove recurring",
+				"s = skip this · f = this & future · d = whole series · Esc cancel",
+				&theme,
+			);
 			None
 		}
 		Mode::Normal | Mode::Calendar => None,
@@ -85,8 +100,8 @@ fn render_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
 		.collect();
 
 	let title = match &app.filter {
-		None => format!(" {} ", app.todo.file_path),
-		Some(s) => format!(" {} — filter: {} ", app.todo.file_path, s.as_str().trim()),
+		None => format!(" Undated — {} ", app.todo.file_path),
+		Some(s) => format!(" Undated — {} · filter: {} ", app.todo.file_path, s.as_str().trim()),
 	};
 	let list = List::new(rows)
 		.block(themed_block(theme, title))
@@ -110,6 +125,15 @@ fn render_calendar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 			events.add(td, has_item);
 		}
 	}
+	// mark recurring occurrences across the visible month
+	let (m_lo, m_hi) = month_bounds(app.cursor);
+	for s in &app.store.series {
+		for d in s.occurrences_in(m_lo..=m_hi) {
+			if let Some(td) = to_time_date(d) {
+				events.add(td, has_item);
+			}
+		}
+	}
 	// cursor styled last so it wins even on a day that also has items
 	if let Some(cur) = to_time_date(app.cursor) {
 		events.add(cur, highlight(theme));
@@ -118,20 +142,74 @@ fn render_calendar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 		frame.render_widget(calendar, inner);
 	}
 
-	// items due on the cursor date (right), with the selected item highlighted
-	let due_idx = app.items_due_on(app.cursor);
-	let due: Vec<ListItem> = due_idx
+	// entries on the cursor date (right): concrete items + recurring occurrences
+	let entries = app.entries_on(app.cursor);
+	let rows: Vec<ListItem> = entries
 		.iter()
-		.map(|&i| ListItem::new(item_line(&app.todo.item_vec[i], theme)))
+		.map(|e| ListItem::new(entry_line(app, e, theme)))
 		.collect();
-	let due_list = List::new(due)
+	let due_list = List::new(rows)
 		.block(themed_block(theme, format!(" Due {} ", app.cursor.format("%Y-%m-%d"))))
 		.highlight_style(highlight(theme));
 	let mut state = ListState::default();
-	if !due_idx.is_empty() {
-		state.select(Some(app.due_selected.min(due_idx.len() - 1)));
+	if !entries.is_empty() {
+		state.select(Some(app.due_selected.min(entries.len() - 1)));
 	}
 	frame.render_stateful_widget(due_list, due_area, &mut state);
+}
+
+fn month_bounds(date: NaiveDate) -> (NaiveDate, NaiveDate) {
+	use chrono::Datelike;
+	let lo = date.with_day(1).unwrap_or(date);
+	let hi = if date.month() == 12 {
+		NaiveDate::from_ymd_opt(date.year() + 1, 1, 1)
+	} else {
+		NaiveDate::from_ymd_opt(date.year(), date.month() + 1, 1)
+	}
+	.and_then(|d| d.pred_opt())
+	.unwrap_or(date);
+	(lo, hi)
+}
+
+/// Render a calendar day row (concrete item or recurring occurrence).
+fn entry_line(app: &App, entry: &DayEntry, theme: &Theme) -> Line<'static> {
+	match entry {
+		DayEntry::Item(i) => item_line(&app.todo.item_vec[*i], theme),
+		DayEntry::Recurring { series_id, date } => match app.store.get(*series_id) {
+			Some(s) => recurring_line(s, *date, theme),
+			None => Line::from(""),
+		},
+	}
+}
+
+/// A recurring occurrence rendered like an item, using the series' effective
+/// view for this date (frozen snapshot if completed, else the live series title).
+fn recurring_line(series: &RecurringSeries, date: NaiveDate, theme: &Theme) -> Line<'static> {
+	let (title, prio, state) = series.view(date);
+	let prefix = state.as_str();
+	let prio_str = if prio > 0 {
+		format!(" {} ", "!".repeat(prio as usize))
+	} else {
+		String::from(" ")
+	};
+	let (prefix_color, desc_style) = match state {
+		Status::Open => (theme.open, Style::default()),
+		Status::InQuestion => (theme.question, Style::default()),
+		Status::Ongoing => (theme.ongoing, Style::default()),
+		Status::Checked => (
+			theme.checked,
+			Style::default()
+				.fg(theme.muted)
+				.add_modifier(Modifier::CROSSED_OUT),
+		),
+		Status::Obsolete => (theme.obsolete, Style::default().fg(theme.muted)),
+	};
+	Line::from(vec![
+		Span::styled(prefix.to_string(), Style::default().fg(prefix_color)),
+		Span::raw(prio_str),
+		Span::styled(title, desc_style),
+		Span::styled(" ⟳", Style::default().fg(theme.muted)),
+	])
 }
 
 fn render_theme_menu(frame: &mut Frame, app: &App, theme: &Theme) {
@@ -148,6 +226,86 @@ fn render_theme_menu(frame: &mut Frame, app: &App, theme: &Theme) {
 	let mut state = ListState::default();
 	state.select(Some(app.theme_idx));
 	frame.render_stateful_widget(list, area, &mut state);
+}
+
+/// Recurrence builder: guided fields plus a raw RRULE field, with a live preview.
+fn render_recur_builder(frame: &mut Frame, app: &App, theme: &Theme) {
+	let Some(b) = app.builder.as_ref() else {
+		return;
+	};
+	let area = centered_fixed(52, 13, frame.area());
+	frame.render_widget(Clear, area);
+	let title = if b.edit.is_some() {
+		" Edit repeat — applies this & future "
+	} else {
+		" New repeating todo "
+	};
+	let block = themed_block(theme, title.into());
+	let inner = block.inner(area);
+	frame.render_widget(block, area);
+
+	let freq = match b.freq {
+		Freq::Daily => "daily",
+		Freq::Weekly => "weekly",
+		Freq::Monthly => "monthly",
+		Freq::Yearly => "yearly",
+	};
+	let field = |i: usize, label: &str, val: String| -> Line<'static> {
+		let focused = b.field == i;
+		let marker = if focused { "› " } else { "  " };
+		let style = if focused {
+			Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+		} else {
+			Style::default().fg(theme.fg)
+		};
+		Line::styled(format!("{marker}{label:<10}{val}"), style)
+	};
+	let preview = b.to_rule().map_or_else(|e| e, |r| r.to_rrule());
+
+	// text fields show their real value when focused (so the caret aligns), else a placeholder
+	let until_val = if b.until.is_empty() && b.field != 4 {
+		"—".into()
+	} else {
+		b.until.clone()
+	};
+	let raw_val = if b.raw.is_empty() && b.field != 5 {
+		"(advanced, optional)".into()
+	} else {
+		b.raw.clone()
+	};
+	let mut lines = vec![
+		field(0, "title:", b.title.clone()),
+		field(1, "frequency:", freq.to_string()),
+		field(2, "interval:", b.interval.to_string()),
+		field(3, "weekday:", format!("{:?} (weekly only)", b.weekday)),
+		field(4, "until:", until_val),
+		field(5, "rrule:", raw_val),
+		Line::raw(""),
+		Line::styled(format!("  preview: {preview}"), Style::default().fg(theme.muted)),
+		Line::styled(
+			"  ↑↓/Tab move · ←→ change · Enter save · Esc cancel",
+			Style::default().fg(theme.muted),
+		),
+	];
+	if !b.error.is_empty() {
+		lines.push(Line::styled(format!("  {}", b.error), Style::default().fg(theme.error)));
+	}
+	frame.render_widget(
+		Paragraph::new(lines).style(Style::default().bg(theme.bg).fg(theme.fg)),
+		inner,
+	);
+
+	// place the terminal cursor in the focused text field ("›·" + label padded to 10 = 12 cols)
+	let text_len = match b.field {
+		0 => Some(b.title.chars().count()),
+		4 => Some(b.until.chars().count()),
+		5 => Some(b.raw.chars().count()),
+		_ => None,
+	};
+	if let Some(len) = text_len {
+		let x = (inner.x + 12 + len as u16).min(inner.x + inner.width.saturating_sub(1));
+		frame.set_cursor_position((x, inner.y + b.field as u16));
+	}
 }
 
 /// Date picker: a calendar grid plus a text field. `Tab` switches focus.
@@ -292,6 +450,7 @@ mod tests {
 	fn renders_items() {
 		let todo = Todo::from_existing("[ ]  fix dates\n[@] !! ship\n", "t.xit".into());
 		let mut app = App::new(todo);
+		app.mode = Mode::Normal; // the undated list view (calendar is the default)
 		let out = render(&mut app);
 		assert!(out.contains("fix dates"));
 		assert!(out.contains("ship"));
@@ -321,13 +480,29 @@ mod tests {
 	}
 
 	#[test]
+	fn calendar_shows_recurring_occurrence() {
+		use crate::recur::rule::Recurrence;
+		let mut app = App::new(Todo::new("t.xit".into()));
+		let anchor = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+		app.store.add(
+			"Water plants".into(),
+			0,
+			Recurrence::from_rrule("FREQ=WEEKLY;BYDAY=MO").unwrap(),
+			anchor,
+		);
+		app.mode = Mode::Calendar;
+		app.cursor = NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(); // a Monday
+		let out = render(&mut app);
+		assert!(out.contains("Water plants"), "recurring occurrence missing: {out:?}");
+	}
+
+	#[test]
 	fn add_popup_opened_from_calendar_keeps_calendar_behind() {
 		use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 		let todo = Todo::from_existing("[@]  !! ship -> 2026-06-19\n", "t.xit".into());
-		let mut app = App::new(todo);
+		let mut app = App::new(todo); // calendar is the default view
 		app.cursor = NaiveDate::from_ymd_opt(2026, 6, 19).unwrap();
 		let press = |app: &mut App, c| app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
-		press(&mut app, 'c'); // enter calendar
 		press(&mut app, 'a'); // open Add over the calendar
 		let out = render(&mut app);
 		assert!(out.contains("June 2026"), "calendar should remain behind: {out:?}");
