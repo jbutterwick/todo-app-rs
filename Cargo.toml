@@ -10,4 +10,7 @@ license = "CC0-1"
 
 [dependencies]
 chrono = "0.4.39"
-ratatui = "0.29"
+ratatui = { version = "0.29", features = ["serde", "widget-calendar"] }
+serde = { version = "1.0.228", features = ["derive"] }
+time = "0.3.49"
+toml = "1.1.2"

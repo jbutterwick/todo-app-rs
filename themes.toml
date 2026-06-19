@@ -1,0 +1,164 @@
+# Themes for todo-app-rs. Each [[theme]] defines the colours used across the UI.
+# Colours are hex ("#rrggbb") or ratatui names ("blue", "dark-gray", ...).
+#
+# Roles:
+#   bg/fg     base background / default text
+#   open ongoing checked obsolete question   the five item statuses
+#   accent    selection + cursor highlight
+#   error     error messages
+#   muted     dim text (borders, weekday header, status line)
+#   marker    calendar days that have due items
+
+[[theme]]
+name = "Catppuccin Mocha"
+bg = "#1e1e2e"
+fg = "#cdd6f4"
+open = "#89b4fa"
+ongoing = "#cba6f7"
+checked = "#a6e3a1"
+obsolete = "#6c7086"
+question = "#f9e2af"
+accent = "#f5c2e7"
+error = "#f38ba8"
+muted = "#a6adc8"
+marker = "#fab387"
+
+[[theme]]
+name = "Catppuccin Macchiato"
+bg = "#24273a"
+fg = "#cad3f5"
+open = "#8aadf4"
+ongoing = "#c6a0f6"
+checked = "#a6da95"
+obsolete = "#6e738d"
+question = "#eed49f"
+accent = "#f5bde6"
+error = "#ed8796"
+muted = "#a5adcb"
+marker = "#f5a97f"
+
+[[theme]]
+name = "Catppuccin Frappe"
+bg = "#303446"
+fg = "#c6d0f5"
+open = "#8caaee"
+ongoing = "#ca9ee6"
+checked = "#a6d189"
+obsolete = "#737994"
+question = "#e5c890"
+accent = "#f4b8e4"
+error = "#e78284"
+muted = "#a5adce"
+marker = "#ef9f76"
+
+[[theme]]
+name = "Catppuccin Latte"
+bg = "#eff1f5"
+fg = "#4c4f69"
+open = "#1e66f5"
+ongoing = "#8839ef"
+checked = "#40a02b"
+obsolete = "#9ca0b0"
+question = "#df8e1d"
+accent = "#ea76cb"
+error = "#d20f39"
+muted = "#6c6f85"
+marker = "#fe640b"
+
+[[theme]]
+name = "Monokai"
+bg = "#272822"
+fg = "#f8f8f2"
+open = "#66d9ef"
+ongoing = "#ae81ff"
+checked = "#a6e22e"
+obsolete = "#75715e"
+question = "#e6db74"
+accent = "#f92672"
+error = "#f92672"
+muted = "#75715e"
+marker = "#fd971f"
+
+[[theme]]
+name = "Dracula"
+bg = "#282a36"
+fg = "#f8f8f2"
+open = "#8be9fd"
+ongoing = "#bd93f9"
+checked = "#50fa7b"
+obsolete = "#6272a4"
+question = "#f1fa8c"
+accent = "#ff79c6"
+error = "#ff5555"
+muted = "#6272a4"
+marker = "#ffb86c"
+
+[[theme]]
+name = "Nord"
+bg = "#2e3440"
+fg = "#d8dee9"
+open = "#81a1c1"
+ongoing = "#b48ead"
+checked = "#a3be8c"
+obsolete = "#4c566a"
+question = "#ebcb8b"
+accent = "#88c0d0"
+error = "#bf616a"
+muted = "#616e88"
+marker = "#d08770"
+
+[[theme]]
+name = "Gruvbox Dark"
+bg = "#282828"
+fg = "#ebdbb2"
+open = "#83a598"
+ongoing = "#d3869b"
+checked = "#b8bb26"
+obsolete = "#928374"
+question = "#fabd2f"
+accent = "#fe8019"
+error = "#fb4934"
+muted = "#928374"
+marker = "#fabd2f"
+
+[[theme]]
+name = "Tokyo Night"
+bg = "#1a1b26"
+fg = "#c0caf5"
+open = "#7aa2f7"
+ongoing = "#bb9af7"
+checked = "#9ece6a"
+obsolete = "#565f89"
+question = "#e0af68"
+accent = "#7dcfff"
+error = "#f7768e"
+muted = "#565f89"
+marker = "#ff9e64"
+
+[[theme]]
+name = "Solarized Dark"
+bg = "#002b36"
+fg = "#839496"
+open = "#268bd2"
+ongoing = "#6c71c4"
+checked = "#859900"
+obsolete = "#586e75"
+question = "#b58900"
+accent = "#2aa198"
+error = "#dc322f"
+muted = "#586e75"
+marker = "#cb4b16"
+
+[[theme]]
+name = "Rose Pine"
+bg = "#191724"
+fg = "#e0def4"
+open = "#9ccfd8"
+ongoing = "#c4a7e7"
+checked = "#31748f"
+obsolete = "#6e6a86"
+question = "#f6c177"
+accent = "#ebbcba"
+error = "#eb6f92"
+muted = "#908caa"
+marker = "#f6c177"

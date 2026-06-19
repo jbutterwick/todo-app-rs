@@ -1,5 +1,6 @@
 mod app;
 mod item;
+mod theme;
 mod todo;
 mod tui;
 mod ui;
